@@ -47,33 +47,9 @@
 
 ## 캡처 이후의 사용자 흐름
 
-```mermaid
-flowchart TD
-    SETUP["첫 사용<br/>사진 접근 설정 · 분석 기준 시각 기록"]
-    CAPTURE["평소에 필요한 화면 캡처<br/>기프티콘 · 업무 · 티켓 · 지원서"]
-    OPEN["나중에 샷스케줄 열기"]
-    ANALYZE["접근 가능한 대상 캡처 분석"]
-    LIST["일정 후보를 한곳에서 확인"]
-    REVIEW["각 후보를 열어 내용 검토<br/>제목 · 날짜 · 시간 수정 / 필수 확인"]
-    DATES{"검토한 날짜 수"}
-    SINGLE["일정 1개 등록"]
-    MULTI["날짜별 일정 여러 개 등록<br/>한 후보의 공통 제목 사용"]
-    SAVE["기기 내 일정 저장 완료"]
-    HOME["앱 달력 · 예정 일정"]
-    WIDGET["위젯 · D-Day"]
-    NOTIFY["로컬 알림"]
-    APPLE["Apple 캘린더 사본"]
+![캡처 이후의 사용자 흐름](docs/images/user-flow.png)
 
-    SETUP --> CAPTURE --> OPEN --> ANALYZE --> LIST --> REVIEW --> DATES
-    DATES -->|1개| SINGLE
-    DATES -->|여러 개| MULTI
-    SINGLE --> SAVE
-    MULTI --> SAVE
-    SAVE --> HOME
-    SAVE -->|위젯 추가 시 표시| WIDGET
-    SAVE -.->|알림 설정 · 권한에 따라| NOTIFY
-    SAVE -.->|캘린더 추가 선택 시| APPLE
-```
+[PDF 원본 보기 · 사용자 흐름과 내부 구조 2페이지](docs/images/shottoschedule-flow-architecture.pdf)
 
 처음 사진을 읽을 수 있는 상태에서 분석을 시작할 때 기준 시각을 기록합니다. 이후 생성된 접근 가능한 스크린샷이 대상이며, 완료한 캡처는 다시 분석하지 않습니다. 유효한 날짜가 없거나 앱 자신의 일정 화면으로 판별된 캡처는 후보를 만들지 않습니다.
 

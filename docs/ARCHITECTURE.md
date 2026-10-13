@@ -2,91 +2,19 @@
 
 현재 구현을 기준으로 사용자 흐름과 내부 처리 관계를 정리했습니다. 2026년 10월 13일 실제 소스와 대조했고, 분석 기준·후보 생성·날짜 추가·등록 저장에 관한 기존 동작 테스트를 확인했습니다.
 
+[PDF 원본 보기 · 사용자 흐름과 내부 구조 2페이지](images/shottoschedule-flow-architecture.pdf)
+
 ## 사용자 흐름
 
 아래는 사진 접근이 가능하고, 검토할 날짜 후보가 발견되는 정상 등록 경로입니다. 점선은 사용자가 선택하고 권한 조건을 충족했을 때 실행하는 기능입니다.
 
-```mermaid
-flowchart TD
-    SETUP["첫 사용<br/>사진 접근 설정 · 분석 기준 시각 기록"]
-    CAPTURE["평소에 필요한 화면 캡처<br/>기프티콘 · 업무 · 티켓 · 지원서"]
-    OPEN["나중에 샷스케줄 열기"]
-    ANALYZE["접근 가능한 대상 캡처 분석"]
-    LIST["일정 후보를 한곳에서 확인"]
-    REVIEW["각 후보를 열어 내용 검토<br/>제목 · 날짜 · 시간 수정 / 필수 확인"]
-    DATES{"검토한 날짜 수"}
-    SINGLE["일정 1개 등록"]
-    MULTI["날짜별 일정 여러 개 등록<br/>한 후보의 공통 제목 사용"]
-    SAVE["기기 내 일정 저장 완료"]
-    HOME["앱 달력 · 예정 일정"]
-    WIDGET["위젯 · D-Day"]
-    NOTIFY["로컬 알림"]
-    APPLE["Apple 캘린더 사본"]
-
-    SETUP --> CAPTURE --> OPEN --> ANALYZE --> LIST --> REVIEW --> DATES
-    DATES -->|1개| SINGLE
-    DATES -->|여러 개| MULTI
-    SINGLE --> SAVE
-    MULTI --> SAVE
-    SAVE --> HOME
-    SAVE -->|위젯 추가 시 표시| WIDGET
-    SAVE -.->|알림 설정 · 권한에 따라| NOTIFY
-    SAVE -.->|캘린더 추가 선택 시| APPLE
-```
+![캡처 이후의 사용자 흐름](images/user-flow.png)
 
 ## 내부 처리 구조
 
-화살표는 처리 순서와 데이터 읽기·저장 관계를 나타냅니다. 분석 단계는 `ScanCoordinator`가 조율합니다. 저장 모델에서 다른 서비스로 이어지는 선이 SwiftData의 자동 실행 트리거를 의미하지는 않습니다.
+가독성을 위해 인접한 분석 단계를 같은 카드에 묶었습니다. 초록 화살표는 처리 순서를, 파랑 화살표는 데이터 읽기·저장을, 점선은 선택 기능을 나타냅니다. 분석 단계는 `ScanCoordinator`가 조율합니다. 저장 모델에서 다른 서비스로 이어지는 선이 SwiftData의 자동 실행 트리거를 의미하지는 않습니다.
 
-```mermaid
-flowchart TD
-    START["HomeView<br/>앱 진입 · 활성화 · 사진 접근 상태 변경"]
-    COORD["ScanCoordinator<br/>분석 단계 조율 · 중단 처리"]
-
-    subgraph ANALYSIS["캡처 분석 — 기기 내 처리"]
-        FIND["ScreenshotDiscoveryService<br/>PhotoKit으로 접근 가능한 스크린샷 탐색"]
-        FILTER["ScanCoordinator<br/>분석 기준 시각 이후의 캡처만 선택"]
-        QUEUE["ScanQueue<br/>중복 · 완료 상태 · 재시도 관리"]
-        LOAD["ScreenshotImageLoader<br/>로컬 이미지 읽기 · 필요 시 iCloud 다운로드"]
-        OCR["TextRecognitionService<br/>Apple Vision 문자 인식"]
-        PARSE["DateTimeParser<br/>날짜 · 시간 · 시간대 · 제목 제안 해석"]
-        CREATE["CandidateCreationService<br/>유효 날짜 · 앱 화면 필터<br/>캡처당 후보 1개와 날짜 선택지 생성"]
-        FIND --> FILTER --> QUEUE --> LOAD --> OCR --> PARSE --> CREATE
-    end
-
-    subgraph LOCAL["기기 내 저장 — SwiftData"]
-        SCANSTATE["ScreenshotScan<br/>분석 상태"]
-        CANDIDATE["ScheduleCandidate<br/>미등록 후보 · 편집 내용 · 등록 연결"]
-        SCHEDULE["Schedule<br/>날짜별 등록 일정"]
-    end
-
-    LIST["CandidateListView<br/>후보 목록 · 선택 제외"]
-    EDIT["CandidateDetailView / CandidateDetailDraft<br/>후보별 검토 · 날짜 추가 · 편집 저장"]
-    REGISTER["ScheduleRegistrationService<br/>재등록 · 필수 확인 · 중복 날짜 검증<br/>일정 생성 + 후보 등록 표시를 함께 저장"]
-    POST["CandidateDetailView<br/>등록 성공 후 선택 기능 처리"]
-    VIEW["HomeView · HomeCalendarView<br/>등록 일정 조회"]
-    SNAPSHOT["WidgetSnapshotStore<br/>등록 일정 스냅샷"]
-    WIDGET["WidgetKit<br/>시스템 타임라인 · 일정 링크"]
-    REMINDER["NotificationScheduler<br/>설정 · 권한에 따른 알림 동기화"]
-    EXPORT["CalendarExportService / EventKit<br/>요청한 일정의 캘린더 사본 추가"]
-
-    START --> COORD --> FIND
-    QUEUE --> SCANSTATE
-    CREATE -->|분석 완료 상태| SCANSTATE
-    CREATE --> CANDIDATE
-    CANDIDATE --> LIST --> EDIT
-    EDIT -->|미등록 편집 저장| CANDIDATE
-    EDIT --> REGISTER
-    REGISTER --> SCHEDULE
-    REGISTER -->|등록 상태 · 일정 ID 연결| CANDIDATE
-    REGISTER -->|저장 성공 후 갱신 시도| SNAPSHOT
-    SCHEDULE --> VIEW
-    SCHEDULE -.->|등록 일정 조회| SNAPSHOT
-    SNAPSHOT --> WIDGET
-    REGISTER -->|등록 결과 반환| POST
-    POST -.-> REMINDER
-    POST -.-> EXPORT
-```
+![캡처 이후의 내부 처리 구조](images/architecture.png)
 
 ## 코드로 확인한 동작
 
