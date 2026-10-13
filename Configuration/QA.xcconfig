@@ -1,0 +1,9 @@
+// Task39: Release is a QA alias; TestFlight uses QA, store release uses Production.
+ADS_ENVIRONMENT = qa
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) ADS_QA
+ADS_APP_ID = ca-app-pub-3940256099942544~1458002511
+ADS_BANNER_ID = ca-app-pub-3940256099942544/2435281174
+OTHER_LDFLAGS = $(inherited) -ObjC -framework JavaScriptCore
+
+// SDK plist identity is separate from the validated advertising configuration.
+ADS_SDK_APP_ID = $(ADS_APP_ID)

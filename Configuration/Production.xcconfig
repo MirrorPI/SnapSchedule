@@ -1,0 +1,8 @@
+// Public source distribution: supply your own advertising configuration for deployment.
+ADS_ENVIRONMENT = production
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) ADS_PRODUCTION
+ADS_APP_ID =
+ADS_BANNER_ID =
+// Official Google SDK bootstrap ID; does not enable a production ad configuration.
+ADS_SDK_APP_ID = ca-app-pub-3940256099942544~1458002511
+OTHER_LDFLAGS = $(inherited) -ObjC -framework JavaScriptCore

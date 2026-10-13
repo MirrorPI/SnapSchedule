@@ -1,0 +1,294 @@
+[
+  {
+    "category" : "none",
+    "days" : [
+
+    ],
+    "hours" : [
+
+    ],
+    "id" : "none-01",
+    "lines" : [
+      "SYNTHETIC SAMPLE",
+      "No appointment information",
+      "A quiet landscape"
+    ]
+  },
+  {
+    "category" : "none",
+    "days" : [
+
+    ],
+    "hours" : [
+
+    ],
+    "id" : "none-02",
+    "lines" : [
+      "SYNTHETIC SAMPLE",
+      "No appointment information",
+      "A quiet landscape"
+    ]
+  },
+  {
+    "category" : "none",
+    "days" : [
+
+    ],
+    "hours" : [
+
+    ],
+    "id" : "none-03",
+    "lines" : [
+      "SYNTHETIC SAMPLE",
+      "No appointment information",
+      "A quiet landscape"
+    ]
+  },
+  {
+    "category" : "none",
+    "days" : [
+
+    ],
+    "hours" : [
+
+    ],
+    "id" : "none-04",
+    "lines" : [
+      "SYNTHETIC SAMPLE",
+      "No appointment information",
+      "A quiet landscape"
+    ]
+  },
+  {
+    "category" : "none",
+    "days" : [
+
+    ],
+    "hours" : [
+
+    ],
+    "id" : "none-05",
+    "lines" : [
+      "SYNTHETIC SAMPLE",
+      "No appointment information",
+      "A quiet landscape"
+    ]
+  },
+  {
+    "category" : "none",
+    "days" : [
+
+    ],
+    "hours" : [
+
+    ],
+    "id" : "none-06",
+    "lines" : [
+      "SYNTHETIC SAMPLE",
+      "No appointment information",
+      "A quiet landscape"
+    ]
+  },
+  {
+    "category" : "none",
+    "days" : [
+
+    ],
+    "hours" : [
+
+    ],
+    "id" : "none-07",
+    "lines" : [
+      "SYNTHETIC SAMPLE",
+      "No appointment information",
+      "A quiet landscape"
+    ]
+  },
+  {
+    "category" : "none",
+    "days" : [
+
+    ],
+    "hours" : [
+
+    ],
+    "id" : "none-08",
+    "lines" : [
+      "SYNTHETIC SAMPLE",
+      "No appointment information",
+      "A quiet landscape"
+    ]
+  },
+  {
+    "category" : "single",
+    "days" : [
+      20
+    ],
+    "hours" : [
+      14
+    ],
+    "id" : "single-01",
+    "lines" : [
+      "SYNTHETIC SAMPLE",
+      "Workshop 2027-01-20 14:00"
+    ]
+  },
+  {
+    "category" : "single",
+    "days" : [
+      20
+    ],
+    "hours" : [
+      14
+    ],
+    "id" : "single-02",
+    "lines" : [
+      "SYNTHETIC SAMPLE",
+      "Workshop 2027-01-20 14:00"
+    ]
+  },
+  {
+    "category" : "single",
+    "days" : [
+      23
+    ],
+    "hours" : [
+      14
+    ],
+    "id" : "single-03",
+    "lines" : [
+      "SYNTHETIC SAMPLE",
+      "Workshop 2027-01-23 14:00"
+    ]
+  },
+  {
+    "category" : "single",
+    "days" : [
+      24
+    ],
+    "hours" : [
+      14
+    ],
+    "id" : "single-04",
+    "lines" : [
+      "SYNTHETIC SAMPLE",
+      "Workshop 2027-01-24 14:00"
+    ]
+  },
+  {
+    "category" : "single",
+    "days" : [
+      25
+    ],
+    "hours" : [
+      14
+    ],
+    "id" : "single-05",
+    "lines" : [
+      "SYNTHETIC SAMPLE",
+      "Workshop 2027-01-25 14:00"
+    ]
+  },
+  {
+    "category" : "single",
+    "days" : [
+      26
+    ],
+    "hours" : [
+      14
+    ],
+    "id" : "single-06",
+    "lines" : [
+      "SYNTHETIC SAMPLE",
+      "Workshop 2027-01-26 14:00"
+    ]
+  },
+  {
+    "category" : "single",
+    "days" : [
+      27
+    ],
+    "hours" : [
+      14
+    ],
+    "id" : "single-07",
+    "lines" : [
+      "SYNTHETIC SAMPLE",
+      "Workshop 2027-01-27 14:00"
+    ]
+  },
+  {
+    "category" : "single",
+    "days" : [
+      28
+    ],
+    "hours" : [
+      14
+    ],
+    "id" : "single-08",
+    "lines" : [
+      "SYNTHETIC SAMPLE",
+      "Workshop 2027-01-28 14:00"
+    ]
+  },
+  {
+    "category" : "multi",
+    "days" : [
+      20,
+      21
+    ],
+    "hours" : [
+      9,
+      15
+    ],
+    "id" : "multi-01",
+    "lines" : [
+      "SYNTHETIC SAMPLE",
+      "Session Alpha 2027-01-20 09:00",
+      "Session Beta 2027-01-21 15:00"
+    ]
+  },
+  {
+    "category" : "multi",
+    "days" : [
+      20,
+      21
+    ],
+    "hours" : [
+      9,
+      15
+    ],
+    "id" : "multi-02",
+    "lines" : [
+      "SYNTHETIC SAMPLE",
+      "Session Alpha 2027-01-20 09:00",
+      "Session Beta 2027-01-21 15:00"
+    ]
+  },
+  {
+    "category" : "edit",
+    "days" : [
+      29
+    ],
+    "hours" : [
+      14
+    ],
+    "id" : "edit-01",
+    "lines" : [
+      "2027-01-29 2:00 PM"
+    ]
+  },
+  {
+    "category" : "edit",
+    "days" : [
+      29
+    ],
+    "hours" : [
+      14
+    ],
+    "id" : "edit-02",
+    "lines" : [
+      "2027-01-29 2:00 PM"
+    ]
+  }
+]

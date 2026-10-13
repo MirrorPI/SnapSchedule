@@ -1,0 +1,75 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "CFBundleDisplayName": {
+      "extractionState": "manual",
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "샷스케줄"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ShotToSchedule"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ショットスケジュール"
+          }
+        }
+      }
+    },
+    "NSPhotoLibraryUsageDescription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ShotToSchedule reads accessible screenshots to find schedule details. It never changes your photos."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "샷스케줄은 접근 가능한 스크린샷에서 일정 정보를 찾습니다. 사진을 변경하지 않습니다."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ショットスケジュールはアクセス可能なスクリーンショットから予定の情報を見つけます。写真を変更することはありません。"
+          }
+        }
+      }
+    },
+    "NSCalendarsWriteOnlyAccessUsageDescription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ShotToSchedule adds only the schedules you choose to Apple Calendar, using the default calendar for new events set on your iPhone."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "샷스케줄은 선택한 일정만 Apple 캘린더에 추가합니다. iPhone에서 새 이벤트용으로 설정한 기본 캘린더에 저장됩니다."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ショットスケジュールは選択した予定のみをAppleカレンダーに追加します。iPhoneで新規イベント用に設定したデフォルトのカレンダーに保存します。"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}
