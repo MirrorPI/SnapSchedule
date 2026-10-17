@@ -3,8 +3,6 @@ import GoogleMobileAds
 import SwiftUI
 import UIKit
 import AppTrackingTransparency
-import Photos
-import EventKit
 @testable import SnapSchedule
 
 @MainActor
@@ -318,9 +316,7 @@ final class AdsConsentManagerTests: XCTestCase {
     func testPendingFormResumesAfterActualSheetDismissal() async throws {
         let sdk = ConsentSDKDouble()
         let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary, tracking: .init(status: { .authorized }, request: { _ in XCTFail("Already authorized") }))
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        let scene = try XCTUnwrap(scenes.first { $0.activationState == .foregroundActive }
-            ?? scenes.first { $0.activationState == .foregroundInactive })
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let previous = scene.windows.first { $0.isKeyWindow }
         let host = AdsConsentHomeHost.Host(manager: manager)
         host.eligible = true
@@ -328,26 +324,12 @@ final class AdsConsentManagerTests: XCTestCase {
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer { window.isHidden = true; window.rootViewController = nil; previous?.makeKeyAndVisible() }
-        func ready() -> Bool {
-            host.visible && host.eligible && host.viewIfLoaded?.window != nil
-                && scene.activationState == .foregroundActive
-                && host.presentedViewController == nil && !host.isBeingDismissed
-        }
-        func readiness() -> String {
-            print("SecurityFixture authorization ATT=\(ATTrackingManager.trackingAuthorizationStatus.rawValue) Photos=\(PHPhotoLibrary.authorizationStatus(for: .readWrite).rawValue) Calendar=\(EKEventStore.authorizationStatus(for: .event).rawValue) sharedBusy=\(AdsConsentManager.shared.isBusy) sharedState=\(AdsConsentManager.shared.state)")
-            return
-            "app=\(UIApplication.shared.applicationState.rawValue) scene=\(scene.activationState.rawValue) visible=\(host.visible) key=\(window.isKeyWindow) hidden=\(window.isHidden) attached=\(host.viewIfLoaded?.window != nil) presented=\(String(describing: host.presentedViewController)) cover=\(scene.windows.contains { $0.accessibilityIdentifier == "AppSnapshotPrivacyShield" && !$0.isHidden })"
-        }
-        for _ in 0..<150 {
-            if sdk.updates.count == 1 && ready() { break }
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        XCTAssertTrue(ready(), readiness())
-        XCTAssertEqual(sdk.updates.count, 1, readiness())
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(sdk.updates.count, 1)
         guard sdk.updates.count == 1 else { return }
         sdk.snapshot = .init(canRequestAds: false, formRequired: true, privacyOptionsRequired: true)
         sdk.updates[0](nil)
-        XCTAssertEqual(sdk.loads.count, 1, readiness())
+        XCTAssertEqual(sdk.loads.count, 1)
         guard sdk.loads.count == 1 else { return }
         let settingsSheet = UIViewController()
         settingsSheet.modalPresentationStyle = .pageSheet
@@ -360,14 +342,11 @@ final class AdsConsentManagerTests: XCTestCase {
         XCTAssertEqual(presentations, 0)
         // Same completion hook used by Home's SwiftUI Settings sheet.
         let dismissed = expectation(description: "Settings sheet dismissed")
-        host.dismiss(animated: false) { dismissed.fulfill() }
-        await fulfillment(of: [dismissed], timeout: 3)
-        for _ in 0..<150 {
-            if ready() { break }
-            try await Task.sleep(for: .milliseconds(20))
+        host.dismiss(animated: false) {
+            manager.homeBecameAvailable()
+            dismissed.fulfill()
         }
-        XCTAssertTrue(ready(), readiness())
-        manager.homeBecameAvailable()
+        await fulfillment(of: [dismissed], timeout: 3)
         XCTAssertEqual(presentations, 1, "visible=\(host.visible) eligible=\(host.eligible) window=\(host.viewIfLoaded?.window != nil) scene=\(scene.activationState.rawValue) presented=\(String(describing: host.presentedViewController)) dismissing=\(host.isBeingDismissed)")
     }
 

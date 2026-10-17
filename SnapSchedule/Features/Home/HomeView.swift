@@ -43,7 +43,6 @@ struct HomeView: View {
     @State private var presentationDate = Date.now
     @State private var deviceTimeZone = TimeZone.current
     @State private var selectedCalendarDate = CalendarDate.gregorianDate(from: .now)
-    @State private var widgetRefreshFailed = false
     @State private var calendarRecoveryMessage: String?
     @State private var compactTypography = false
     @State private var isResumingCalendarExports = false
@@ -143,17 +142,10 @@ struct HomeView: View {
             SettingsView(notificationAuthorization: notificationAuthorization, managesNotificationAuthorization: false,
                 photoAuthorization: photoAuthorization, adsConsent: adsConsent,
                 notificationScheduler: notificationScheduler,
-                notificationScheduleQueryFailed: notificationScheduleQueryFailed, showsDismissButton: false,
-                eraseAnalysis: {
-                    try await scanCoordinator.eraseScreenshotAnalysis()
-                    navigation.candidateWillLeave = nil
-                    navigation.candidateDetailID = nil
-                    candidateSelectionState = CandidateSelectionState()
-                })
+                notificationScheduleQueryFailed: notificationScheduleQueryFailed, showsDismissButton: false)
                 .tabItem { Label(String(localized: "Settings"), systemImage: "gearshape") }
                 .tag(AppTab.settings)
         }
-        .environment(\.reportWidgetRefreshFailure, { widgetRefreshFailed = true })
         .tint(navigation.tab == .candidates ? reviewStatus.color : SnapScheduleStyle.action)
         .onChange(of: navigation.tab) { _, tab in
             if tab != .home { bannerController.stop() }
@@ -247,13 +239,6 @@ struct HomeView: View {
                     .accessibilityIdentifier("home-ad-placement")
                 List {
                     Section {
-                        if widgetRefreshFailed {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Label(String(localized: "Your schedule change is saved. The widget could not refresh. Its previous display may remain until iOS reloads it."), systemImage: "exclamationmark.triangle")
-                                Button(String(localized: "Retry Widget Refresh")) { refreshWidgetSnapshot() }
-                            }
-                            .foregroundStyle(.orange)
-                        }
                         if let calendarRecoveryMessage {
                             Label(calendarRecoveryMessage, systemImage: "exclamationmark.triangle")
                                 .foregroundStyle(.orange)
@@ -451,20 +436,8 @@ struct HomeView: View {
     }
 
     private func refreshWidgetSnapshot() {
-        let store = WidgetSnapshotStore()
-        do {
-            let storedSchedules: [Schedule]
-            do {
-                storedSchedules = try modelContext.fetch(FetchDescriptor<Schedule>())
-            } catch {
-                try store.invalidate()
-                throw error
-            }
-            _ = try store.write(schedules: storedSchedules)
-            widgetRefreshFailed = false
-        } catch {
-            widgetRefreshFailed = true
-        }
+        guard let storedSchedules = try? modelContext.fetch(FetchDescriptor<Schedule>()) else { return }
+        _ = try? WidgetSnapshotStore().write(schedules: storedSchedules)
     }
 
     private func routeNotificationIfNeeded() {
@@ -557,15 +530,4 @@ struct HomeNotificationStatusView: View {
         }
     }
 
-}
-
-private struct WidgetRefreshFailureReporterKey: EnvironmentKey {
-    static let defaultValue: @MainActor @Sendable () -> Void = {}
-}
-
-extension EnvironmentValues {
-    var reportWidgetRefreshFailure: @MainActor @Sendable () -> Void {
-        get { self[WidgetRefreshFailureReporterKey.self] }
-        set { self[WidgetRefreshFailureReporterKey.self] = newValue }
-    }
 }

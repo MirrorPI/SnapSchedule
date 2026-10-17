@@ -15,13 +15,11 @@ struct UpcomingScheduleWidgetContent: View {
                         mediumContent(compact: false)
                         mediumContent(compact: true)
                     }
-                    .privacySensitive()
                 } else if let schedule = plan.presentations.first {
                     ViewThatFits(in: .vertical) {
                         smallContent(schedule, compact: false)
                         smallContent(schedule, compact: true)
                     }
-                    .privacySensitive()
                     .widgetURL(WidgetScheduleLink.url(for: schedule.id))
                 }
             case .empty:
