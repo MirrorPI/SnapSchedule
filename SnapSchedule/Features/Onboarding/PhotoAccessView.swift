@@ -5,26 +5,26 @@ import UIKit
 
 struct PhotoAccessView: View {
     let authorization: PhotoAuthorizationService
+    var isOnboarding = false
     @Environment(\.openURL) private var openURL
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label(title, systemImage: symbolName)
-                .font(.headline)
+                .font(isOnboarding ? .title.bold() : .headline)
+                .fixedSize(horizontal: false, vertical: true)
 
             Text(message)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(isOnboarding ? .title3 : .subheadline)
+                .foregroundStyle(isOnboarding ? .primary : .secondary)
+                .lineSpacing(isOnboarding ? 6 : 0)
                 .fixedSize(horizontal: false, vertical: true)
 
             switch authorization.access {
             case .notDetermined:
-                Button(String(localized: "Continue")) {
-                    Task {
-                        await authorization.requestAccess()
-                    }
+                if !isOnboarding {
+                    PhotoAccessContinueButton(authorization: authorization)
                 }
-                .snapPrimaryAction()
             case .limited:
                 VStack(alignment: .leading, spacing: 8) {
                     Button(String(localized: "Manage Selected Photos")) {
@@ -114,6 +114,43 @@ struct PhotoAccessView: View {
                 authorization.refresh()
             }
         }
+    }
+}
+
+/// Keep the first permission action visible even when the explanation needs to scroll.
+struct PhotoOnboardingView: View {
+    let authorization: PhotoAuthorizationService
+
+    var body: some View {
+        ScrollView {
+            PhotoAccessView(authorization: authorization, isOnboarding: true)
+                .padding(24)
+                .frame(maxWidth: 520, alignment: .leading)
+                .frame(maxWidth: .infinity)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            PhotoAccessContinueButton(authorization: authorization)
+                .padding(24)
+                .frame(maxWidth: 520)
+                .frame(maxWidth: .infinity)
+                .background(Color(uiColor: .systemBackground))
+        }
+    }
+}
+
+private struct PhotoAccessContinueButton: View {
+    let authorization: PhotoAuthorizationService
+
+    var body: some View {
+        Button {
+            Task { await authorization.requestAccess() }
+        } label: {
+            Text(String(localized: "Continue"))
+                .frame(maxWidth: .infinity)
+        }
+        .snapPrimaryAction()
+        .accessibilityIdentifier("photo-access-continue")
     }
 }
 

@@ -705,12 +705,80 @@ final class ScanCoordinatorTests: XCTestCase {
         XCTAssertNil(harness.coordinator.status.imageLoadPhase)
     }
 
+    func testErasingAnalysisPreservesRegisteredSchedulesAndDoesNotRecreateOldScreenshots() async throws {
+        let h = try makeHarness(discoveries: [[asset("old", createdAt: 100)]],
+            load: { _, _ in XCTFail("Erased images must stay before the new cutoff"); throw CancellationError() },
+            recognize: { _ in [] }, analysisDate: Date(timeIntervalSince1970: 500))
+        let candidate = ScheduleCandidate(sourceAssetIdentifier: "old", sourceCandidateKey: "private",
+            evidenceText: "Private OCR evidence", title: "Private candidate")
+        let schedule = Schedule(sourceCandidateID: candidate.id, title: "Keep registered schedule",
+            date: CalendarDate(year: 2026, month: 10, day: 18), sourceAssetIdentifier: "old")
+        h.context.insert(candidate)
+        h.context.insert(ScreenshotScan(assetIdentifier: "old", status: .completed))
+        h.context.insert(schedule)
+        try h.context.save()
+        try await h.coordinator.eraseScreenshotAnalysis()
+        let persisted = ModelContext(h.context.container)
+        XCTAssertEqual(try persisted.fetchCount(FetchDescriptor<ScheduleCandidate>()), 0)
+        XCTAssertEqual(try persisted.fetchCount(FetchDescriptor<ScreenshotScan>()), 0)
+        let remaining = try persisted.fetch(FetchDescriptor<Schedule>())
+        XCTAssertEqual(remaining.map(\.id), [schedule.id])
+        XCTAssertEqual(remaining.first?.sourceAssetIdentifier, "old")
+        XCTAssertEqual(remaining.first?.title, "Keep registered schedule")
+        XCTAssertEqual(h.settings.screenshotAnalysisBaselineDate, Date(timeIntervalSince1970: 500))
+        XCTAssertEqual(h.coordinator.status.pendingCandidateCount, 0)
+        await h.coordinator.activate(access: .authorized)
+        XCTAssertEqual(try persisted.fetchCount(FetchDescriptor<ScreenshotScan>()), 0)
+        XCTAssertTrue(h.loadedIdentifiers.values.isEmpty)
+    }
+
+    func testErasingWaitsForCancelledLoadAndRejectsQueuedReactivation() async throws {
+        let gate = AsyncGate()
+        let h = try makeHarness(discoveries: [[asset("old", createdAt: 100)]], load: { id, _ in
+            await gate.wait()
+            return ScreenshotImageInput(data: Data(id.utf8), orientation: .up)
+        }, recognize: { _ in XCTFail("Cancelled analysis must not reach OCR"); return [] },
+            analysisDate: Date(timeIntervalSince1970: 500))
+        let activation = Task { await h.coordinator.activate(access: .authorized) }
+        await waitUntil { h.coordinator.status.state == .analyzing }
+        let erasure = Task { try await h.coordinator.eraseScreenshotAnalysis() }
+        await waitUntil { h.coordinator.isErasingAnalysis }
+        await h.coordinator.activate(access: .authorized)
+        XCTAssertTrue(h.coordinator.isErasingAnalysis, "Erasure must drain the old task before completing")
+        await gate.open()
+        try await erasure.value
+        await activation.value
+        XCTAssertFalse(h.coordinator.isErasingAnalysis)
+        XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<ScreenshotScan>()), 0)
+        XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<ScheduleCandidate>()), 0)
+    }
+
+    func testErasureSaveFailurePreservesAnalysisAndCutoff() async throws {
+        let h = try makeHarness(discoveries: [], load: { _, _ in throw CancellationError() },
+            recognize: { _ in [] }, initialBaseline: Date(timeIntervalSince1970: 10),
+            eraseSave: { _ in throw CocoaError(.fileWriteNoPermission) })
+        h.context.insert(ScreenshotScan(assetIdentifier: "keep", status: .completed))
+        h.context.insert(ScheduleCandidate(sourceAssetIdentifier: "keep", sourceCandidateKey: "keep",
+            evidenceText: "Keep until deletion succeeds", title: "Keep"))
+        try h.context.save()
+        do {
+            try await h.coordinator.eraseScreenshotAnalysis()
+            XCTFail("A failed save cannot be reported as successful deletion")
+        } catch {}
+        let persisted = ModelContext(h.context.container)
+        XCTAssertEqual(try persisted.fetchCount(FetchDescriptor<ScreenshotScan>()), 1)
+        XCTAssertEqual(try persisted.fetchCount(FetchDescriptor<ScheduleCandidate>()), 1)
+        XCTAssertEqual(h.settings.screenshotAnalysisBaselineDate, Date(timeIntervalSince1970: 10))
+        XCTAssertFalse(h.coordinator.isErasingAnalysis)
+    }
+
     private func makeHarness(
         discoveries: [[ScreenshotAssetMetadata]],
         load: @escaping ScanCoordinator.LoadImage,
         recognize: @escaping ScanCoordinator.RecognizeText,
         initialBaseline: Date? = .distantPast,
-        analysisDate: Date = Date(timeIntervalSince1970: 1_800_000_000)
+        analysisDate: Date = Date(timeIntervalSince1970: 1_800_000_000),
+        eraseSave: @escaping (ModelContext) throws -> Void = { try $0.save() }
     ) throws -> Harness {
         let context = ModelContext(try SnapScheduleModelContainer.makeInMemory())
         context.autosaveEnabled = false
@@ -740,7 +808,8 @@ final class ScanCoordinatorTests: XCTestCase {
             recognizeText: recognize,
             analysisDate: { analysisDate },
             timeZone: { TimeZone(identifier: "Asia/Seoul")! },
-            analysisVersion: "task-11-tests"
+            analysisVersion: "task-11-tests",
+            eraseSave: eraseSave
         )
         return Harness(
             coordinator: coordinator,

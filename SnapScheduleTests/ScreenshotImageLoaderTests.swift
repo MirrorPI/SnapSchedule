@@ -5,6 +5,64 @@ import XCTest
 @testable import SnapSchedule
 
 final class ScreenshotImageLoaderTests: XCTestCase {
+
+    func testPhotoKitAdapterRejectsOversizedBytesBeforePreviewDecoding() {
+        let data = Data(repeating: 0, count: 32 * 1_024 * 1_024 + 1)
+        let event = ScreenshotPhotoKitEventAdapter.result(
+            data: data, orientation: .up, info: nil, source: .local)
+        guard case .failed = event else {
+            return XCTFail("Oversized encoded data must not reach UIImage/Vision consumers")
+        }
+    }
+
+    func testPhotoKitAdapterRejectsHugePixelDimensionsWithoutDecodingPixels() {
+        let data = pngHeader(width: 9_000, height: 4_000)
+        let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary)!
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)! as NSDictionary
+        XCTAssertEqual((properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue, 9_000)
+        let event = ScreenshotPhotoKitEventAdapter.result(
+            data: data, orientation: .up, info: nil, source: .local)
+        guard case .failed = event else {
+            return XCTFail("36 million declared pixels must be rejected before any raster allocation")
+        }
+    }
+
+    private func pngHeader(width: UInt32, height: UInt32) -> Data {
+        // Synthetic PNG header only: no user photo and no large raster allocation.
+        var data = Data([137, 80, 78, 71, 13, 10, 26, 10])
+        func appendChunk(_ name: String, _ bytes: [UInt8]) {
+            let length = UInt32(bytes.count)
+            data.append(contentsOf: [UInt8((length >> 24) & 255), UInt8((length >> 16) & 255),
+                UInt8((length >> 8) & 255), UInt8(length & 255)])
+            let payload = Array(name.utf8) + bytes
+            data.append(contentsOf: payload)
+            var crc: UInt32 = 0xffff_ffff
+            for byte in payload {
+                crc ^= UInt32(byte)
+                for _ in 0..<8 { crc = (crc >> 1) ^ (crc & 1 == 1 ? 0xedb8_8320 : 0) }
+            }
+            crc ^= 0xffff_ffff
+            data.append(contentsOf: [UInt8((crc >> 24) & 255), UInt8((crc >> 16) & 255),
+                UInt8((crc >> 8) & 255), UInt8(crc & 255)])
+        }
+        var dimensions: [UInt8] = []
+        for value in [width, height] {
+            dimensions.append(UInt8((value >> 24) & 255))
+            dimensions.append(UInt8((value >> 16) & 255))
+            dimensions.append(UInt8((value >> 8) & 255))
+            dimensions.append(UInt8(value & 255))
+        }
+        appendChunk("IHDR", dimensions + [1, 0, 0, 0, 0])
+        // zlib-compressed 4,504,000 zero bytes: 4,000 rows of 9,000 one-bit pixels,
+        // each with its filter byte. The fixture allocates only its 4.4KB encoding.
+        let compressed: [UInt8] = [120, 156, 236, 193, 1, 1, 0, 0, 0, 128, 144, 254, 175, 238, 8, 10]
+            + Array(repeating: 0, count: 4_094)
+            + [128, 219, 131, 67, 2, 0, 0, 0, 0, 65, 255, 95, 187, 194, 6]
+            + Array(repeating: 0, count: 269) + [156, 2, 189, 188, 0, 1]
+        appendChunk("IDAT", compressed)
+        appendChunk("IEND", [])
+        return data
+    }
     @MainActor
     func testPreviewModelShowsICloudProgressThenRetryableFailure() async {
         let model = ScreenshotPreviewModel(

@@ -604,6 +604,16 @@ private final class DecorationProbeDelegate: NSObject, UICalendarViewDelegate {
 
 @MainActor
 final class HomeRegisteredOriginalTests: XCTestCase {
+    private func disabledAdsConsent() -> AdsConsentManager {
+        AdsConsentManager(configuration: .resolve(environment: .debug, appID: "", bannerID: ""), sdk: .init(
+            snapshot: { XCTFail("No ad SDK calls in original-image fixtures"); return .init(canRequestAds: false, formRequired: false, privacyOptionsRequired: false) },
+            update: { _ in XCTFail("No ad SDK update in original-image fixtures") },
+            loadForm: { _ in XCTFail("No ad form in original-image fixtures") },
+            privacyOptions: { _ in XCTFail("No ad options in original-image fixtures") },
+            start: { _ in XCTFail("No ad SDK initialization in original-image fixtures") }
+        ), tracking: .init(status: { .denied }, request: { _ in XCTFail("No ATT request in original-image fixtures") }))
+    }
+
     func testHomeSelectedDayShowsOriginalWithoutCandidateIgnoreAction() throws {
         let container = try makeContainer()
         let schedule = Schedule(sourceCandidateID: UUID(), title: "Registered original fixture",
@@ -616,7 +626,10 @@ final class HomeRegisteredOriginalTests: XCTestCase {
         let data = fixtureImage().pngData()!
         let controller = UIHostingController(rootView: HomeView(scanCoordinator: scan,
             notificationNavigation: NotificationNavigationStore(),
-            notificationAuthorization: NotificationAuthorizationService(statusProvider: { .denied }, authorizationRequester: { _ in false }))
+            notificationAuthorization: NotificationAuthorizationService(statusProvider: { .denied }, authorizationRequester: { _ in false }),
+            photoAuthorization: PhotoAuthorizationService(statusProvider: { .authorized }, authorizationRequester: {
+                XCTFail("Registered-original fixtures must not request Photos permission"); return .authorized
+            }), adsConsent: disabledAdsConsent())
             .modelContainer(container).environment(\.scenePhase, .active).environment(\.screenshotThumbnailFactory, { identifier in
                 ScreenshotPreviewModel(sourceScreenshotIdentifier: identifier) { _, _ in
                     ScreenshotImageInput(data: data, orientation: .up)
@@ -701,7 +714,10 @@ final class HomeRegisteredOriginalTests: XCTestCase {
                 }
             }
             let controller = UIHostingController(rootView: HomeView(scanCoordinator: scan, notificationNavigation: NotificationNavigationStore(),
-                notificationAuthorization: NotificationAuthorizationService(statusProvider: { .denied }, authorizationRequester: { _ in false }))
+                notificationAuthorization: NotificationAuthorizationService(statusProvider: { .denied }, authorizationRequester: { _ in false }),
+            photoAuthorization: PhotoAuthorizationService(statusProvider: { .authorized }, authorizationRequester: {
+                XCTFail("Registered-original fixtures must not request Photos permission"); return .authorized
+            }), adsConsent: disabledAdsConsent())
                 .modelContainer(container).environment(\.scenePhase, .active).environment(\.screenshotThumbnailFactory, factory)
                 .environment(\.screenshotCalendarThumbnailFactory, factory)
                 .environment(\.dynamicTypeSize, large ? .accessibility3 : .large)
@@ -759,7 +775,10 @@ final class HomeRegisteredOriginalTests: XCTestCase {
         let scan = ScanCoordinator(context: container.mainContext, settings: AppSettings(), discover: { .unavailable($0) },
             loadImage: { _, _ in throw ScreenshotImageLoadError.inaccessible }, recognizeText: { _ in [] })
         let controller = UIHostingController(rootView: HomeView(scanCoordinator: scan, notificationNavigation: NotificationNavigationStore(),
-            notificationAuthorization: NotificationAuthorizationService(statusProvider: { .denied }, authorizationRequester: { _ in false }))
+            notificationAuthorization: NotificationAuthorizationService(statusProvider: { .denied }, authorizationRequester: { _ in false }),
+            photoAuthorization: PhotoAuthorizationService(statusProvider: { .authorized }, authorizationRequester: {
+                XCTFail("Registered-original fixtures must not request Photos permission"); return .authorized
+            }), adsConsent: disabledAdsConsent())
             .modelContainer(container).environment(\.scenePhase, .active)
             .environment(\.screenshotThumbnailFactory, { identifier in
                 ScreenshotPreviewModel(sourceScreenshotIdentifier: identifier) { _, _ in ScreenshotImageInput(data: data, orientation: .up) }

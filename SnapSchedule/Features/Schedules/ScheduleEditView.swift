@@ -2,6 +2,7 @@ import SwiftData
 import SwiftUI
 
 struct ScheduleEditView: View {
+    @Environment(\.reportWidgetRefreshFailure) private var reportWidgetRefreshFailure
     @Environment(\.snapCompactTypography) private var compactTypography
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -206,7 +207,8 @@ struct ScheduleEditView: View {
         let turnsOnNotifications = draft.enablesNotification(comparedTo: schedule)
 
         do {
-            _ = try ScheduleMutationService(context: modelContext).update(scheduleID: schedule.id, draft: draft)
+            let result = try ScheduleMutationService(context: modelContext).update(scheduleID: schedule.id, draft: draft)
+            if result.widgetRefreshFailed { reportWidgetRefreshFailure() }
             isSaving = true
             Task { @MainActor in
                 let access: NotificationAuthorizationAccess

@@ -35,9 +35,8 @@ final class AdaptiveBannerController: NSObject, BannerViewDelegate, AdSizeDelega
         guard eligible, manager.canRequestAds, width.isFinite, width >= 320,
               maximumHeight.isFinite, maximumHeight >= 50, maximumHeight <= Self.maximumHeight,
               case let .configured(ids) = configuration.state else { stop(); return }
-        // Task41 enables test placement only. Production IDs remain configured but never load here.
-        guard AdsConfiguration.buildEnvironment == .debug || AdsConfiguration.buildEnvironment == .qa,
-              ids.bannerID == "ca-app-pub-3940256099942544/2435281174" else { stop(); return }
+        // AdsConfiguration validates the ID pair for this build. Production uses
+        // its own banner ID after the same live ATT and UMP checks as test builds.
         let next = Placement(width: floor(width), maximumHeight: floor(maximumHeight), revision: manager.revision)
         guard next != placement else { return } // Includes failures: no retry loop on body evaluation.
         dispose()

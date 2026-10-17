@@ -11,6 +11,124 @@ import GoogleMobileAds
 /// Real product views hosted in the Simulator. Fixtures never touch the user's photo library or store.
 @MainActor
 final class Task421DesignPresentationTests: XCTestCase {
+    func testFirstHomeShowsPhotoGuideAndRequestsAccessOnlyAfterContinue() async throws {
+        let automation = try PresentationAutomationScope()
+        defer { automation.restore() }
+        for result in [PHAuthorizationStatus.authorized, .limited, .denied, .restricted] {
+            try await verifyPhotoEntry(initialStatus: .notDetermined, requestResult: result)
+        }
+    }
+
+    func testPreviouslyChosenPhotoAccessStartsOnCalendarWithoutRequestingAgain() async throws {
+        let automation = try PresentationAutomationScope()
+        defer { automation.restore() }
+        for status in [PHAuthorizationStatus.authorized, .limited, .denied, .restricted] {
+            try await verifyPhotoEntry(initialStatus: status, requestResult: status)
+        }
+    }
+
+    func testFirstHomeContinueRemainsVisibleWithLargeTextOnSmallPhone() async throws {
+        let automation = try PresentationAutomationScope()
+        defer { automation.restore() }
+        try await verifyPhotoEntry(initialStatus: .notDetermined, requestResult: .authorized,
+            largeText: true)
+    }
+
+    private func verifyPhotoEntry(initialStatus: PHAuthorizationStatus,
+        requestResult: PHAuthorizationStatus, largeText: Bool = false) async throws {
+        let container = try SnapScheduleModelContainer.makeInMemory()
+        let suite = "photo-onboarding-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var status = initialStatus
+        var requests = 0
+        var discoveries = 0
+        var observedAccess: [PhotoLibraryAccess] = []
+        let photo = PhotoAuthorizationService(statusProvider: { status }, authorizationRequester: {
+            requests += 1
+            status = requestResult
+            return status
+        })
+        let scan = ScanCoordinator(context: container.mainContext, settings: AppSettings(userDefaults: defaults),
+            discover: { access in
+                observedAccess.append(access)
+                guard access.canReadAccessiblePhotos else { return .unavailable(access) }
+                discoveries += 1
+                return .authorized([])
+            },
+            loadImage: { _, _ in throw ScreenshotImageLoadError.inaccessible }, recognizeText: { _ in [] })
+        let navigation = AppTabNavigation()
+        let host = UIHostingController(rootView: HomeView(scanCoordinator: scan,
+            notificationNavigation: NotificationNavigationStore(),
+            notificationAuthorization: NotificationAuthorizationService(statusProvider: { .denied },
+                authorizationRequester: { _ in XCTFail("Photo setup must not request notifications"); return false }),
+            notificationScheduler: NotificationScheduler(center: DesignNotificationCenter()),
+            photoAuthorization: photo, navigation: navigation)
+            .modelContainer(container).environment(\.scenePhase, .active)
+            .environment(\.dynamicTypeSize, largeText ? .accessibility3 : .large))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first { $0.isKeyWindow }
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 375, height: 667)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { scan.cancel(); window.isHidden = true; previous?.makeKeyAndVisible() }
+        func settle() async throws { try await Task.sleep(for: .milliseconds(400)); host.view.layoutIfNeeded() }
+        func continueButton() -> NSObject? {
+            PresentationAutomationScope.objects(in: window).first {
+                $0.isAccessibilityElement && $0.accessibilityTraits.contains(.button)
+                    && $0.accessibilityLabel == String(localized: "Continue")
+            }
+        }
+        func hasCalendar() -> Bool {
+            descendantsForResponsive(host.view).contains { $0 is UICalendarView }
+        }
+        try await settle()
+        if initialStatus == .notDetermined {
+            for _ in 0..<30 {
+                if PresentationAutomationScope.objects(in: window).contains(where: {
+                    $0.accessibilityLabel?.contains(String(localized: "Find schedules in screenshots")) == true
+                }) { break }
+                try await Task.sleep(for: .milliseconds(100))
+                host.view.layoutIfNeeded()
+            }
+        }
+        XCTAssertEqual(navigation.tab, .home)
+        XCTAssertEqual(requests, 0, "Launching must not open the system permission dialog automatically")
+        if initialStatus == .notDetermined {
+            XCTAssertFalse(hasCalendar(), "First launch should show the photo guide immediately")
+            XCTAssertEqual(discoveries, 0, "Do not scan before the user grants access")
+            let button = try XCTUnwrap(continueButton(), "Continue must be present on the first home screen")
+            let visibleFrame = window.convert(window.bounds, to: nil)
+            XCTAssertTrue(visibleFrame.contains(button.accessibilityFrame), "Continue must be fully visible without scrolling")
+            XCTAssertTrue(PresentationAutomationScope.objects(in: window).contains {
+                $0.accessibilityLabel?.contains(String(localized: "Find schedules in screenshots")) == true
+            })
+            attach(window, name: "photo-first-launch-\(largeText ? "large-text" : "normal")-\(requestResult.rawValue)")
+            XCTAssertTrue(activateReviewButton(button, in: host.view))
+            try await settle()
+            if photo.access.canReadAccessiblePhotos {
+                for _ in 0..<30 where discoveries == 0 {
+                    try await Task.sleep(for: .milliseconds(100))
+                    host.view.layoutIfNeeded()
+                }
+                print("Photo entry discovery: \(observedAccess), status: \(scan.status), requests: \(requests)")
+            }
+            XCTAssertEqual(requests, 1)
+            XCTAssertEqual(photo.access, PhotoLibraryAccess(systemStatus: requestResult))
+            XCTAssertNil(continueButton())
+            XCTAssertTrue(hasCalendar(), "Both accepting and declining must lead to the normal home")
+            if photo.access.canReadAccessiblePhotos {
+                XCTAssertGreaterThan(discoveries, 0, "The existing scan lifecycle must resume after permission")
+            } else {
+                XCTAssertEqual(discoveries, 0)
+            }
+        } else {
+            XCTAssertNil(continueButton())
+            XCTAssertTrue(hasCalendar(), "Existing permission choices should bypass first-launch guidance")
+        }
+    }
+
     func testAddedDateManualDateTimeZoneAndAllDayControlsKeepFirstRowIndependent() async throws {
         let automation = try PresentationAutomationScope(); defer { automation.restore() }
         let container = try SnapScheduleModelContainer.makeInMemory(); let context = container.mainContext
@@ -1239,7 +1357,7 @@ final class Task421DesignPresentationTests: XCTestCase {
         var loads = 0
         let manager = AdsConsentManager(configuration: configuration, sdk: .init(
             snapshot: { .init(canRequestAds: allowed, formRequired: false, privacyOptionsRequired: false) },
-            update: { $0(nil) }, loadForm: { _ in XCTFail("No external form") }, privacyOptions: { _ in }, start: { $0() }))
+            update: { $0(nil) }, loadForm: { _ in XCTFail("No external form") }, privacyOptions: { _ in }, start: { $0() }), tracking: .init(status: { .authorized }, request: { _ in XCTFail("Already authorized") }))
         let controller = AdaptiveBannerController(manager: manager, configuration: configuration, load: { _, _ in loads += 1 })
         let navigation = AppTabNavigation()
         let selection = CandidateSelectionState()

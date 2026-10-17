@@ -4,8 +4,33 @@ import Photos
 import UIKit
 
 struct ScreenshotImageInput: Equatable, Sendable {
+    // Encoded bytes and declared pixels are separate budgets: a small compressed
+    // file can expand into a large raster. 32M 8-bit RGBA pixels alone use 128MB.
+    static let maximumEncodedByteCount = 32 * 1_024 * 1_024
+    static let maximumPixelCount = 32_000_000
+
     let data: Data
     let orientation: CGImagePropertyOrientation
+
+    var exceedsProcessingLimits: Bool {
+        guard data.count <= Self.maximumEncodedByteCount else { return true }
+        let options = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, options),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, options) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+              let height = properties[kCGImagePropertyPixelHeight] as? NSNumber else {
+            // Invalid/unsupported encodings retain their existing decoder error
+            // behavior; this preflight only rejects evidenced resource excess.
+            return false
+        }
+        return Self.exceedsPixelLimit(width: width.doubleValue, height: height.doubleValue)
+    }
+
+    static func exceedsPixelLimit(width: Double, height: Double) -> Bool {
+        guard width.isFinite, height.isFinite, width > 0, height > 0 else { return false }
+        // Division avoids overflow from hostile or corrupt dimension metadata.
+        return width > Double(maximumPixelCount) / height
+    }
 }
 
 enum ScreenshotImageLoadSource: Equatable, Sendable {
@@ -66,6 +91,9 @@ enum ScreenshotPhotoKitEventAdapter {
         }
 
         let input = ScreenshotImageInput(data: data, orientation: orientation)
+        guard !input.exceedsProcessingLimits else {
+            return .failed(.retryable(source))
+        }
         return boolValue(PHImageResultIsDegradedKey, in: info)
             ? .degraded(input)
             : .completed(input)
@@ -156,6 +184,14 @@ final class ScreenshotImageLoader: Sendable {
             )
             guard let asset = assets.firstObject else {
                 receive(.failed(.inaccessible))
+                return PHInvalidImageRequestID
+            }
+            // Reject before PhotoKit creates a preview raster or downloads the
+            // original. Byte-length validation still runs on returned data.
+            guard !ScreenshotImageInput.exceedsPixelLimit(
+                width: Double(asset.pixelWidth), height: Double(asset.pixelHeight)
+            ) else {
+                receive(.failed(.retryable(.local)))
                 return PHInvalidImageRequestID
             }
 

@@ -24,7 +24,7 @@
 | 개인정보처리방침 | [한국어](https://shottoschedule.newwren3.chatgpt.site/privacy.html) · [English](https://shottoschedule.newwren3.chatgpt.site/en/privacy.html) · [日本語](https://shottoschedule.newwren3.chatgpt.site/ja/privacy.html) |
 | 소개 이미지 원본 | [언어·기기별 이미지 모음](docs/SCREENSHOTS.md) |
 
-**App Store:** 2026년 10월 11일 버전 1.0(빌드 4)을 심사 제출했습니다. 공개 출시 후 다운로드 링크를 추가할 예정입니다.
+**App Store:** [샷스케줄 다운로드](https://apps.apple.com/app/id6821328198). 이 저장소는 1.0.1 소스 변경을 반영하며, 실제 배포 버전은 App Store에서 확인할 수 있습니다.
 
 ## 어떤 일을 할 수 있나요?
 

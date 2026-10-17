@@ -42,6 +42,7 @@ struct ScheduleDetailEntryView: View {
 }
 
 struct ScheduleDetailView: View {
+    @Environment(\.reportWidgetRefreshFailure) private var reportWidgetRefreshFailure
     @Environment(\.snapCompactTypography) private var compactTypography
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -229,7 +230,8 @@ struct ScheduleDetailView: View {
 
     private func deleteSchedule() {
         do {
-            _ = try ScheduleMutationService(context: modelContext).delete(scheduleID: schedule.id)
+            let result = try ScheduleMutationService(context: modelContext).delete(scheduleID: schedule.id)
+            if result.widgetRefreshFailed { reportWidgetRefreshFailure() }
             Task { @MainActor in
                 if let schedules = try? modelContext.fetch(FetchDescriptor<Schedule>()) {
                     await notificationScheduler.synchronize(

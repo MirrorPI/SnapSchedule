@@ -7,6 +7,10 @@ struct SettingsView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     @State private var settings: AppSettings
+    @State private var isConfirmingAnalysisErasure = false
+    @State private var isErasingAnalysis = false
+    @State private var analysisErasureMessage: String?
+    private let eraseAnalysis: (@MainActor () async throws -> Void)?
     @State private var calendarAccess: CalendarAuthorizationAccess
     let photoAuthorization: PhotoAuthorizationService
     let adsConsent: AdsConsentManager
@@ -26,13 +30,15 @@ struct SettingsView: View {
         calendarAccessProvider: @escaping @MainActor () -> CalendarAuthorizationAccess = { .current },
         notificationScheduler: NotificationScheduler? = nil,
         notificationScheduleQueryFailed: Bool = false,
-        showsDismissButton: Bool = true
+        showsDismissButton: Bool = true,
+        eraseAnalysis: (@MainActor () async throws -> Void)? = nil
     ) {
         self.notificationAuthorization = notificationAuthorization
         self.managesNotificationAuthorization = managesNotificationAuthorization
         self.notificationScheduler = notificationScheduler
         self.notificationScheduleQueryFailed = notificationScheduleQueryFailed
         self.showsDismissButton = showsDismissButton
+        self.eraseAnalysis = eraseAnalysis
         self.photoAuthorization = photoAuthorization
         self.adsConsent = adsConsent
         self.calendarAccessProvider = calendarAccessProvider
@@ -132,6 +138,26 @@ struct SettingsView: View {
                 } header: {
                     SnapSectionTitle(title: String(localized: "Photo access"), symbol: "photo")
                 }
+                if eraseAnalysis != nil {
+                    Section {
+                        Button(String(localized: "Delete Screenshot Analysis"), role: .destructive) {
+                            isConfirmingAnalysisErasure = true
+                        }
+                        .disabled(isErasingAnalysis)
+                        .accessibilityIdentifier("erase-screenshot-analysis")
+                        if isErasingAnalysis {
+                            ProgressView(String(localized: "Deleting analysis…"))
+                        }
+                        if let analysisErasureMessage {
+                            Text(analysisErasureMessage)
+                                .accessibilityIdentifier("analysis-erasure-result")
+                        }
+                    } header: {
+                        SnapSectionTitle(title: String(localized: "Local data"), symbol: "internaldrive")
+                    } footer: {
+                        Text(String(localized: "Deletes extracted candidates and analysis history. Registered schedules, original photos, Calendar copies, and existing backups are kept. Older screenshots will not be analyzed again."))
+                    }
+                }
                 Section {
                     Link(destination: supportURL) {
                         Label(String(localized: "Support"), systemImage: "questionmark.circle")
@@ -169,6 +195,26 @@ struct SettingsView: View {
                     }
                 }
             }
+        }
+        .confirmationDialog(String(localized: "Delete screenshot analysis?"),
+            isPresented: $isConfirmingAnalysisErasure, titleVisibility: .visible) {
+            Button(String(localized: "Delete Screenshot Analysis"), role: .destructive) {
+                guard let eraseAnalysis, !isErasingAnalysis else { return }
+                isErasingAnalysis = true
+                analysisErasureMessage = nil
+                Task { @MainActor in
+                    defer { isErasingAnalysis = false }
+                    do {
+                        try await eraseAnalysis()
+                        analysisErasureMessage = String(localized: "Screenshot analysis was deleted. Registered schedules and original photos were kept.")
+                    } catch {
+                        analysisErasureMessage = String(localized: "Analysis could not be deleted. Please try again.")
+                    }
+                }
+            }
+            Button(String(localized: "Cancel"), role: .cancel) {}
+        } message: {
+            Text(String(localized: "This cannot be undone. Only extracted candidates and analysis history are deleted. Registered schedules, original photos, Calendar copies, and existing backups are kept."))
         }
         .task {
             if managesNotificationAuthorization {

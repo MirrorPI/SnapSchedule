@@ -379,15 +379,91 @@ final class PersistenceTests: XCTestCase {
         )
         let readOnlyContainer = try ModelContainer(for: schema, configurations: [readOnlyConfiguration])
         let readOnlyStore = LocalDataStore(container: readOnlyContainer)
+        let pending = ScreenshotScan(assetIdentifier: "pending", status: .pending)
+        XCTAssertThrowsError(try readOnlyStore.add(pending))
 
-        XCTAssertThrowsError(
-            try readOnlyStore.add(ScreenshotScan(assetIdentifier: "pending", status: .pending))
-        )
+        let registered: ScreenshotScan? = readOnlyStore.context.registeredModel(for: pending.persistentModelID)
+        XCTAssertFalse(readOnlyStore.context.hasChanges)
+        XCTAssertTrue(readOnlyStore.context.insertedModelsArray.isEmpty)
+        XCTAssertNil(registered)
+        XCTAssertNil(pending.modelContext)
+
+        let independentContext = ModelContext(readOnlyContainer)
+        independentContext.autosaveEnabled = false
+        let independentlyReadScans = try independentContext.fetch(FetchDescriptor<ScreenshotScan>())
+        XCTAssertEqual(independentlyReadScans.map(\.assetIdentifier), ["existing"])
+        XCTAssertEqual(independentlyReadScans.first?.status, .completed)
+        let reopenedContext = ModelContext(try SnapScheduleModelContainer.make(url: storeURL))
+        reopenedContext.autosaveEnabled = false
+        let diskScans = try reopenedContext.fetch(FetchDescriptor<ScreenshotScan>())
+        XCTAssertEqual(diskScans.map(\.assetIdentifier), ["existing"])
+        XCTAssertEqual(diskScans.first?.status, .completed)
+
+        // An allowsSave:false SwiftData store can keep a stale pending fetch overlay
+        // after rollback, even when the failed model is detached and disk is unchanged.
+        // Read persisted rows explicitly before checking the same context's default view.
+        var persistedOnly = FetchDescriptor<ScreenshotScan>()
+        persistedOnly.includePendingChanges = false
+        let persistedScans = try readOnlyStore.context.fetch(persistedOnly)
+        XCTAssertEqual(persistedScans.map(\.assetIdentifier), ["existing"])
+        XCTAssertEqual(persistedScans.first?.status, .completed)
 
         let scans = try readOnlyStore.context.fetch(FetchDescriptor<ScreenshotScan>())
         XCTAssertEqual(scans.count, 1)
         XCTAssertEqual(scans[0].assetIdentifier, "existing")
         XCTAssertEqual(scans[0].status, .completed)
+    }
+
+    func testOpeningExistingStoreRestoresProtectionWithoutLosingData() throws {
+        let (directory, storeURL) = try makeStoreLocation()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let schema = Schema([ScreenshotScan.self, ScheduleCandidate.self, Schedule.self])
+        let scheduleID = UUID()
+        try autoreleasepool {
+            let legacy = try ModelContainer(for: schema, configurations: [
+                ModelConfiguration("SnapSchedule", schema: schema, url: storeURL, cloudKitDatabase: .none)
+            ])
+            let context = ModelContext(legacy)
+            context.insert(Schedule(id: scheduleID, sourceCandidateID: UUID(), title: "Preserve private data",
+                date: CalendarDate(year: 2027, month: 1, day: 1), sourceAssetIdentifier: "asset"))
+            try context.save()
+        }
+        for suffix in ["", "-wal", "-shm"] {
+            let path = storeURL.path + suffix
+            if FileManager.default.fileExists(atPath: path) {
+                try FileManager.default.setAttributes([.protectionKey: FileProtectionType.none], ofItemAtPath: path)
+            }
+        }
+
+        guard try FileManager.default.attributesOfItem(atPath: storeURL.path)[.protectionKey] != nil else {
+            throw XCTSkip("File protection attributes require a physical iOS device")
+        }
+        let reopened = try SnapScheduleModelContainer.make(url: storeURL)
+        let context = ModelContext(reopened)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<Schedule>()).first?.id, scheduleID)
+        try context.save()
+        for suffix in ["", "-wal", "-shm"] {
+            let path = storeURL.path + suffix
+            XCTAssertTrue(FileManager.default.fileExists(atPath: path), "Expected SQLite file: \(suffix)")
+            let attributes = try FileManager.default.attributesOfItem(atPath: path)
+            XCTAssertEqual(attributes[.protectionKey] as? FileProtectionType, .completeUntilFirstUserAuthentication, "Store file: \(suffix)")
+        }
+    }
+
+    func testNewStoreRetainsProtectionAfterItsFirstSave() throws {
+        let (directory, storeURL) = try makeStoreLocation()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let container = try SnapScheduleModelContainer.make(url: storeURL)
+        let context = ModelContext(container)
+        context.insert(ScreenshotScan(assetIdentifier: "first", status: .completed))
+        try context.save()
+        for suffix in ["", "-wal", "-shm"] {
+            let attributes = try FileManager.default.attributesOfItem(atPath: storeURL.path + suffix)
+            guard attributes[.protectionKey] != nil else {
+                throw XCTSkip("File protection attributes require a physical iOS device")
+            }
+            XCTAssertEqual(attributes[.protectionKey] as? FileProtectionType, .completeUntilFirstUserAuthentication, "New store file: \(suffix)")
+        }
     }
 
     func testContainerConfigurationExplicitlyDisablesCloudKit() throws {

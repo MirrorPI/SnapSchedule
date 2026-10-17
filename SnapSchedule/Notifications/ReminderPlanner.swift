@@ -31,7 +31,7 @@ struct ReminderPlan: Equatable, Sendable {
 }
 
 enum ReminderPlanner {
-    static func plan(for schedule: Schedule, now: Date) -> ReminderPlan {
+    static func plan(for schedule: Schedule, now: Date, includingPast: Bool = false) -> ReminderPlan {
         var reminders: [PlannedReminder] = []
         var exclusions: [ReminderExclusion] = []
 
@@ -49,7 +49,7 @@ enum ReminderPlanner {
                 exclusions.append(ReminderExclusion(kind: kind, reason: .invalidSchedule))
                 continue
             }
-            guard fireDate > now else {
+            guard includingPast || fireDate > now else {
                 exclusions.append(ReminderExclusion(kind: kind, reason: .notFuture))
                 continue
             }

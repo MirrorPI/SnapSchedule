@@ -151,7 +151,7 @@ private final class BannerFixture {
     lazy var manager = AdsConsentManager(configuration: configuration, sdk: .init(
         snapshot: { .init(canRequestAds: self.allowed, formRequired: false, privacyOptionsRequired: true) },
         update: { $0(nil) }, loadForm: { _ in },
-        privacyOptions: { self.optionsCompletion = $0 }, start: { $0() }))
+        privacyOptions: { self.optionsCompletion = $0 }, start: { $0() }), tracking: .init(status: { .authorized }, request: { _ in XCTFail("Already authorized") }))
     lazy var controller = AdaptiveBannerController(manager: manager, configuration: configuration, load: { [weak self] _, request in
         self?.requests.append(request) // Intercept the external network boundary only.
     })
@@ -160,16 +160,38 @@ private final class BannerFixture {
 
 @MainActor
 final class AdaptiveBannerIntegrationTests: XCTestCase {
-    func testProductionConfigurationNeverRequestsAnAd() {
+    // The old test-only placement gate stranded the App Store build with no requests.
+    // Intercept load so this regression test never sends a production ad request.
+    func testProductionConfigurationLoadsOnceAfterConsentWithNPA() throws {
         let fixture = BannerFixture()
-        var loads = 0
+        var requests: [Request] = []
         let configuration = AdsConfiguration.resolve(environment: .production,
-            appID: "ca-app-pub-1234567890123456~1234567890", bannerID: "ca-app-pub-1234567890123456/1234567890")
+            appID: "ca-app-pub-1234567890123456~1234567890", bannerID: "ca-app-pub-1234567890123456/0987654321")
         let controller = AdaptiveBannerController(manager: fixture.manager, configuration: configuration,
-            load: { _, _ in loads += 1 })
+            load: { _, request in requests.append(request) })
+        for _ in 0..<5 { controller.update(width: 390, eligible: true) }
+        let banner = try XCTUnwrap(controller.banner)
+        XCTAssertEqual(banner.adUnitID, "ca-app-pub-1234567890123456/0987654321")
+        XCTAssertEqual(requests.count, 1)
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertEqual((request.adNetworkExtras(for: Extras.self) as? Extras)?.additionalParameters?["npa"] as? String, "1")
+        XCTAssertNil(request.contentURL)
+        XCTAssertNil(request.keywords)
+
+        fixture.allowed = false
         controller.update(width: 390, eligible: true)
         XCTAssertNil(controller.banner)
-        XCTAssertEqual(loads, 0)
+        XCTAssertEqual(requests.count, 1)
+    }
+
+    func testProductionConfigurationDoesNotLoadBeforeConsent() {
+        let fixture = BannerFixture(allowed: false)
+        let configuration = AdsConfiguration.resolve(environment: .production,
+            appID: "ca-app-pub-1234567890123456~1234567890", bannerID: "ca-app-pub-1234567890123456/0987654321")
+        let controller = AdaptiveBannerController(manager: fixture.manager, configuration: configuration,
+            load: { _, _ in XCTFail("Consent must still gate production requests") })
+        controller.update(width: 390, eligible: true)
+        XCTAssertNil(controller.banner)
     }
 
     func testActualUMPAllowsOfficialTestAdOrRecordsUnverified() async throws {
@@ -388,7 +410,10 @@ private struct BannerLayoutFixture: View {
                     eligible: !presentation.showingSheet, layout: layout))
             }
             .ignoresSafeArea(.keyboard, edges: .bottom)
-            .navigationTitle("Home")
+            // Match Home's navigation chrome so list scrolling cannot collapse
+            // a fixture-only large title and move the entire content container.
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar { Button("Settings") { presentation.showingSheet = true } }
         }
         .sheet(isPresented: Binding(get: { presentation.showingSheet }, set: { presentation.showingSheet = $0 })) {

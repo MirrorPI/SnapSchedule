@@ -228,7 +228,7 @@ final class CalendarExportService {
         scheduleID: UUID,
         confirmUnknownDuplicateRisk: Bool = false
     ) async -> CalendarExportResult {
-        guard let schedule = storedSchedule(id: scheduleID) else {
+        guard var schedule = storedSchedule(id: scheduleID) else {
             return .failed(.unavailable)
         }
         if schedule.calendarExportStatus == .succeeded {
@@ -248,9 +248,8 @@ final class CalendarExportService {
             }
         }
 
-        let draft: CalendarEventDraft
         do {
-            draft = try eventDraft(for: schedule)
+            _ = try eventDraft(for: schedule)
         } catch {
             return finalizeClearFailure(.invalidSchedule, for: schedule)
         }
@@ -273,8 +272,16 @@ final class CalendarExportService {
                 writer.access
             }
         } catch {
-            return finalizeClearFailure(.accessRequestFailed, for: schedule)
+            guard let current = storedSchedule(id: scheduleID),
+                  current.calendarExportStatus == .exporting else { return .failed(.unavailable) }
+            return finalizeClearFailure(.accessRequestFailed, for: current)
         }
+
+        // Permission requests suspend. Another scene may delete or edit the
+        // schedule while the system prompt is open. Re-read the saved intent.
+        guard let current = storedSchedule(id: scheduleID),
+              current.calendarExportStatus == .exporting else { return .failed(.unavailable) }
+        schedule = current
 
         switch access {
         case .denied:
@@ -287,6 +294,12 @@ final class CalendarExportService {
             return finalizeClearFailure(.accessRequestFailed, for: schedule)
         }
 
+        let draft: CalendarEventDraft
+        do {
+            draft = try eventDraft(for: schedule)
+        } catch {
+            return finalizeClearFailure(.invalidSchedule, for: schedule)
+        }
         let identifier: String?
         do {
             identifier = try writer.save(draft)

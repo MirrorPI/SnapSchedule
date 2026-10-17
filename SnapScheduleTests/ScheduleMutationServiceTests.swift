@@ -113,11 +113,13 @@ final class ScheduleMutationServiceTests: XCTestCase {
         var draft = ScheduleEditDraft(schedule: schedule)
         draft.title = "Updated"
 
-        _ = try service.update(scheduleID: schedule.id, draft: draft)
+        let update = try service.update(scheduleID: schedule.id, draft: draft)
         XCTAssertEqual(schedule.title, "Updated")
+        XCTAssertTrue(update.widgetRefreshFailed, "The caller must be able to disclose and retry a failed widget refresh")
 
-        _ = try service.delete(scheduleID: schedule.id)
+        let deletion = try service.delete(scheduleID: schedule.id)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Schedule>()), 0)
+        XCTAssertTrue(deletion.widgetRefreshFailed)
     }
 
     func testInvalidEditsAreRejectedBeforeMutatingStoredSchedule() throws {
@@ -148,6 +150,53 @@ final class ScheduleMutationServiceTests: XCTestCase {
         XCTAssertEqual(schedule.title, "Original")
         XCTAssertEqual(schedule.date, CalendarDate(year: 2026, month: 10, day: 3))
         XCTAssertEqual(schedule.time, ClockTime(hour: 14, minute: 30))
+    }
+
+    func testWidgetRetryRegeneratesCommittedEditWithoutRepeatingTheMutation() throws {
+        let context = try makeContext()
+        let schedule = makeSchedule(id: id(10))
+        context.insert(schedule)
+        try context.save()
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var shouldFail = true
+        var saveCount = 0
+        let snapshotStore = WidgetSnapshotStore(
+            containerURL: { directory },
+            now: { Date(timeIntervalSince1970: 0) },
+            atomicWrite: { data, url in
+                if shouldFail { throw TestError.saveFailed }
+                try data.write(to: url, options: .atomic)
+            },
+            timelineReload: {}
+        )
+        let service = ScheduleMutationService(
+            context: context,
+            save: { context in
+                try context.save()
+                saveCount += 1
+            },
+            widgetSnapshotRefresh: {
+                _ = try snapshotStore.write(schedules: context.fetch(FetchDescriptor<Schedule>()))
+            }
+        )
+        var draft = ScheduleEditDraft(schedule: schedule)
+        draft.title = "Committed new title"
+        let result = try service.update(scheduleID: schedule.id, draft: draft)
+        XCTAssertTrue(result.widgetRefreshFailed)
+        XCTAssertEqual(snapshotStore.read(), .missing)
+        XCTAssertThrowsError(try service.retryWidgetSnapshotRefresh())
+
+        shouldFail = false
+        try service.retryWidgetSnapshotRefresh()
+
+        guard case let .success(snapshot) = snapshotStore.read() else {
+            return XCTFail("Retry must publish the committed schedule")
+        }
+        XCTAssertEqual(snapshot.schedules.map(\.title), ["Committed new title"])
+        XCTAssertEqual(saveCount, 1)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Schedule>()), 1)
     }
 
     func testDeletePreservesRegisteredCandidateAndCompletedScan() throws {

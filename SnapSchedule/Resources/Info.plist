@@ -248,6 +248,8 @@
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSUserTrackingUsageDescription</key>
+	<string>Allow Google advertising services to use device identifiers to measure advertising across other companies’ apps and websites. Your photos and schedules are not shared.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>ShotToSchedule reads accessible screenshots to find schedule details. It never changes your photos.</string>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>

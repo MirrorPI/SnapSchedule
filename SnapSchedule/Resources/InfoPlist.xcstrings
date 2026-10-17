@@ -69,6 +69,29 @@
           }
         }
       }
+    },
+    "NSUserTrackingUsageDescription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow Google advertising services to use device identifiers to measure advertising across other companies’ apps and websites. Your photos and schedules are not shared."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google 광고 서비스가 기기 식별자를 사용하여 다른 회사의 앱 및 웹사이트에서 광고 효과를 측정하도록 허용합니다. 사진과 일정 내용은 공유하지 않습니다."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Googleの広告サービスが端末識別子を使い、他社のアプリやWebサイトで広告効果を測定することを許可します。写真や予定の内容は共有しません。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

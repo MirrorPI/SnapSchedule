@@ -8948,6 +8948,248 @@
           }
         }
       }
+    },
+    "Delete Screenshot Analysis": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete Screenshot Analysis"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "스크린샷 분석 기록 삭제"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "スクリーンショットの解析を削除"
+          }
+        }
+      }
+    },
+    "Deleting analysis…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deleting analysis…"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "분석 기록 삭제 중…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "解析を削除中…"
+          }
+        }
+      }
+    },
+    "Local data": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local data"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "기기 내 데이터"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "デバイス内のデータ"
+          }
+        }
+      }
+    },
+    "Deletes extracted candidates and analysis history. Registered schedules, original photos, Calendar copies, and existing backups are kept. Older screenshots will not be analyzed again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deletes extracted candidates and analysis history. Registered schedules, original photos, Calendar copies, and existing backups are kept. Older screenshots will not be analyzed again."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "추출된 후보와 분석 이력을 삭제합니다. 등록된 일정, 사진 원본, 캘린더 사본과 기존 백업은 유지됩니다. 이전 스크린샷은 다시 분석하지 않습니다."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "抽出した候補と解析履歴を削除します。登録済みの予定、元の写真、カレンダーのコピー、既存のバックアップは保持されます。以前のスクリーンショットは再解析しません。"
+          }
+        }
+      }
+    },
+    "Delete screenshot analysis?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete screenshot analysis?"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "스크린샷 분석 기록을 삭제할까요?"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "スクリーンショットの解析を削除しますか？"
+          }
+        }
+      }
+    },
+    "This cannot be undone. Only extracted candidates and analysis history are deleted. Registered schedules, original photos, Calendar copies, and existing backups are kept.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This cannot be undone. Only extracted candidates and analysis history are deleted. Registered schedules, original photos, Calendar copies, and existing backups are kept."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "삭제 후에는 되돌릴 수 없습니다. 추출된 후보와 분석 이력만 삭제합니다. 등록된 일정, 사진 원본, 캘린더 사본과 기존 백업은 유지됩니다."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この操作は取り消せません。抽出した候補と解析履歴のみ削除します。登録済みの予定、元の写真、カレンダーのコピー、既存のバックアップは保持されます。"
+          }
+        }
+      }
+    },
+    "Screenshot analysis was deleted. Registered schedules and original photos were kept.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Screenshot analysis was deleted. Registered schedules and original photos were kept."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "스크린샷 분석 기록을 삭제했습니다. 등록된 일정과 사진 원본은 유지됩니다."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "スクリーンショットの解析を削除しました。登録済みの予定と元の写真は保持されています。"
+          }
+        }
+      }
+    },
+    "Analysis could not be deleted. Please try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analysis could not be deleted. Please try again."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "분석 기록을 삭제하지 못했습니다. 다시 시도해 주세요."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "解析を削除できませんでした。もう一度お試しください。"
+          }
+        }
+      }
+    },
+    "This screenshot is too large to analyze safely.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This screenshot is too large to analyze safely."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 스크린샷은 너무 커서 안전하게 분석할 수 없습니다."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このスクリーンショットは大きすぎるため、安全に解析できません。"
+          }
+        }
+      }
+    },
+    "Your schedule change is saved. The widget could not refresh. Its previous display may remain until iOS reloads it.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your schedule change is saved. The widget could not refresh. Its previous display may remain until iOS reloads it."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "일정 변경은 저장되었습니다. 위젯을 새로 고치지 못했습니다. iOS가 다시 불러올 때까지 이전 내용이 표시될 수 있습니다."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "予定の変更は保存されています。ウィジェットを更新できませんでした。iOSが再読み込みするまで以前の内容が表示される場合があります。"
+          }
+        }
+      }
+    },
+    "Retry Widget Refresh": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry Widget Refresh"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "위젯 새로 고침 재시도"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ウィジェットの更新を再試行"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

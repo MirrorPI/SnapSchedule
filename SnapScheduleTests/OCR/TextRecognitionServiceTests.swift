@@ -6,6 +6,38 @@ import XCTest
 
 @MainActor
 final class TextRecognitionServiceTests: XCTestCase {
+
+    func testOversizedOCRResultThrowsInsteadOfReturningAPartialRecognition() async {
+        let cases = [
+            [RecognizedTextFragment(text: String(repeating: "x", count: 8_001), boundingBox: .zero, confidence: 1)],
+            (0..<257).map { _ in RecognizedTextFragment(text: "date", boundingBox: .zero, confidence: 1) },
+        ]
+        for fragments in cases {
+            let service = TextRecognitionService { _ in
+                TextRecognitionWork(perform: { fragments }, cancel: {})
+            }
+            do {
+                _ = try await service.recognize(ScreenshotImageInput(data: Data(), orientation: .up))
+                XCTFail("Oversized recognition must be rejected, not truncated")
+            } catch {
+                XCTAssertEqual(String(describing: error), "inputTooLarge")
+            }
+        }
+    }
+
+    func testOversizedEncodedImageIsRejectedBeforeCreatingVisionWork() async {
+        let service = TextRecognitionService { _ in
+            XCTFail("Oversized bytes must not reach image decoder or Vision work construction")
+            return TextRecognitionWork(perform: { [] }, cancel: {})
+        }
+        do {
+            _ = try await service.recognize(ScreenshotImageInput(
+                data: Data(repeating: 0, count: 32 * 1_024 * 1_024 + 1), orientation: .up))
+            XCTFail("Oversized image must be rejected")
+        } catch {
+            XCTAssertEqual(String(describing: error), "inputTooLarge")
+        }
+    }
     func testRecognitionRunsOffMainThreadAndReturnsStableReadingOrder() async throws {
         let lowerRight = RecognizedTextFragment(
             text: "third",

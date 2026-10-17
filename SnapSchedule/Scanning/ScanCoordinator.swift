@@ -40,6 +40,7 @@ final class ScanCoordinator {
     typealias RecognizeText = @MainActor (ScreenshotImageInput) async throws -> [RecognizedTextFragment]
 
     private(set) var status: ScanStatus
+    private(set) var isErasingAnalysis = false
 
     @ObservationIgnored private let context: ModelContext
     @ObservationIgnored private let settings: AppSettings
@@ -55,6 +56,7 @@ final class ScanCoordinator {
     @ObservationIgnored private var activeTask: Task<Void, Never>?
     @ObservationIgnored private var queuedAccess: PhotoLibraryAccess?
     @ObservationIgnored private var imageLoadID: UUID?
+    @ObservationIgnored private let eraseSave: (ModelContext) throws -> Void
 
     init(
         context: ModelContext,
@@ -65,7 +67,8 @@ final class ScanCoordinator {
         parser: DateTimeParser = DateTimeParser(),
         analysisDate: @escaping () -> Date = Date.init,
         timeZone: @escaping () -> TimeZone = { .current },
-        analysisVersion: String = "vision3-parser2-filter1"
+        analysisVersion: String = "vision3-parser2-filter1",
+        eraseSave: @escaping (ModelContext) throws -> Void = { try $0.save() }
     ) {
         self.context = context
         self.settings = settings
@@ -78,6 +81,7 @@ final class ScanCoordinator {
         self.analysisDate = analysisDate
         self.timeZone = timeZone
         self.analysisVersion = analysisVersion
+        self.eraseSave = eraseSave
         status = ScanStatus(pendingCandidateCount: Self.pendingCandidateCount(in: context))
     }
 
@@ -104,6 +108,7 @@ final class ScanCoordinator {
     }
 
     func activate(access: PhotoLibraryAccess) async {
+        guard !isErasingAnalysis else { return }
         status.photoAccess = access
         if let activeTask {
             queuedAccess = access
@@ -120,6 +125,35 @@ final class ScanCoordinator {
         }
         activeTask = task
         await task.value
+    }
+
+    func eraseScreenshotAnalysis() async throws {
+        guard !isErasingAnalysis else { throw CocoaError(.userCancelled) }
+        isErasingAnalysis = true
+        defer { isErasingAnalysis = false }
+        queuedAccess = nil
+        let drainingTask = activeTask
+        drainingTask?.cancel()
+        await drainingTask?.value
+        queuedAccess = nil
+        imageLoadID = nil
+
+        let previousBaseline = settings.screenshotAnalysisBaselineDate
+        do {
+            let candidates = try context.fetch(FetchDescriptor<ScheduleCandidate>())
+            let scans = try context.fetch(FetchDescriptor<ScreenshotScan>())
+            // Persist the cutoff first, so an interrupted deletion cannot reimport
+            // the removed analysis on the next activation. Restore it on failure.
+            settings.screenshotAnalysisBaselineDate = analysisDate()
+            candidates.forEach { context.delete($0) }
+            scans.forEach { context.delete($0) }
+            try eraseSave(context)
+        } catch {
+            context.rollback()
+            settings.screenshotAnalysisBaselineDate = previousBaseline
+            throw error
+        }
+        status = ScanStatus(photoAccess: status.photoAccess)
     }
 
     func cancel() {
@@ -385,6 +419,8 @@ final class ScanCoordinator {
             return "image-local"
         case ScreenshotImageLoadError.retryable(.iCloud):
             return "image-icloud"
+        case TextRecognitionError.inputTooLarge:
+            return "ocr-input-too-large"
         case let TextRecognitionError.failed(domain, code):
             return "ocr-\(domain)-\(code)"
         default:
@@ -399,6 +435,8 @@ final class ScanCoordinator {
             return String(localized: "The image is temporarily unavailable.")
         case ScreenshotImageLoadError.retryable(.iCloud):
             return String(localized: "The iCloud image could not be downloaded.")
+        case TextRecognitionError.inputTooLarge:
+            return String(localized: "This screenshot is too large to analyze safely.")
         case let TextRecognitionError.failed(domain, code):
             return String(localized: "Text recognition failed (\(domain) \(code)).")
         default:

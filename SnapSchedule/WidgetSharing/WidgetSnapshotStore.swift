@@ -4,6 +4,7 @@ import WidgetKit
 enum WidgetSnapshotStoreError: Error, Equatable {
     case containerUnavailable
     case writeFailed
+    case invalidationFailed
 }
 
 @MainActor
@@ -30,7 +31,7 @@ struct WidgetSnapshotStore {
         now: @escaping () -> Date = Date.init,
         deviceTimeZone: @escaping () -> TimeZone = { .current },
         atomicWrite: @escaping AtomicWrite = { data, url in
-            try data.write(to: url, options: .atomic)
+            try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         },
         timelineReload: @escaping TimelineReload = {
             WidgetCenter.shared.reloadTimelines(ofKind: WidgetScheduleLink.widgetKind)
@@ -46,6 +47,7 @@ struct WidgetSnapshotStore {
     @discardableResult
     func write(schedules: [Schedule]) throws -> WidgetScheduleSnapshotFile {
         guard let containerURL = containerURL() else {
+            timelineReload()
             throw WidgetSnapshotStoreError.containerUnavailable
         }
 
@@ -80,17 +82,41 @@ struct WidgetSnapshotStore {
             schedules: items
         )
 
+        let fileURL = containerURL.appending(path: Self.fileName)
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
             let data = try encoder.encode(snapshot)
-            try atomicWrite(data, containerURL.appending(path: Self.fileName))
+            try atomicWrite(data, fileURL)
+            try FileManager.default.setAttributes(
+                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                ofItemAtPath: fileURL.path
+            )
             timelineReload()
             return snapshot
-        } catch let error as WidgetSnapshotStoreError {
-            throw error
         } catch {
+            // A failed replacement must not leave an old, now-private title behind.
+            try invalidate(fileURL: fileURL)
             throw WidgetSnapshotStoreError.writeFailed
+        }
+    }
+
+    func invalidate() throws {
+        guard let containerURL = containerURL() else {
+            timelineReload()
+            throw WidgetSnapshotStoreError.containerUnavailable
+        }
+        try invalidate(fileURL: containerURL.appending(path: Self.fileName))
+    }
+
+    private func invalidate(fileURL: URL) throws {
+        defer { timelineReload() }
+        do {
+            try FileManager.default.removeItem(at: fileURL)
+        } catch let error as CocoaError where error.code == .fileNoSuchFile {
+            // Already absent is a successfully invalidated snapshot.
+        } catch {
+            throw WidgetSnapshotStoreError.invalidationFailed
         }
     }
 

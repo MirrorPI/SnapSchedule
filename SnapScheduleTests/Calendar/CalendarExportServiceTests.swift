@@ -11,6 +11,43 @@ final class CalendarExportServiceTests: XCTestCase {
         case localSaveFailed
     }
 
+    func testDeletedScheduleDuringCalendarPermissionDoesNotCreateExternalCopy() async throws {
+        let context = try makeContext()
+        let schedule = makeSchedule(status: .pending)
+        let id = schedule.id
+        context.insert(schedule)
+        try context.save()
+        let writer = FakeCalendarEventWriter(access: .notDetermined)
+        writer.requestResult = .writeOnly
+        writer.onRequest = {
+            context.delete(schedule)
+            try context.save()
+        }
+        let result = await CalendarExportService(context: context, writer: writer).export(scheduleID: id)
+        XCTAssertEqual(result, .failed(.unavailable))
+        XCTAssertEqual(writer.saveAttemptCount, 0, "A deleted schedule cannot be sent after a suspended permission request")
+        XCTAssertEqual(try ModelContext(context.container).fetchCount(FetchDescriptor<Schedule>()), 0)
+    }
+
+    func testCalendarPermissionCompletionUsesCurrentSavedScheduleContent() async throws {
+        let context = try makeContext()
+        let schedule = makeSchedule(status: .pending)
+        schedule.time = nil
+        context.insert(schedule)
+        try context.save()
+        let writer = FakeCalendarEventWriter(access: .notDetermined)
+        writer.requestResult = .writeOnly
+        writer.onRequest = {
+            schedule.title = "Corrected title before granting access"
+            schedule.date = CalendarDate(year: 2027, month: 2, day: 15)
+            try context.save()
+        }
+        let result = await CalendarExportService(context: context, writer: writer).export(scheduleID: schedule.id)
+        XCTAssertEqual(result, .succeeded)
+        XCTAssertEqual(writer.savedEvents.single?.title, "Corrected title before granting access")
+        XCTAssertEqual(writer.savedEvents.single?.startDate, instant(2027, 2, 15, 0, 0, timeZone: "Asia/Seoul"))
+    }
+
     func testAllDayExportUsesLocalMidnightAndExclusiveNextDayWithoutAlarms() async throws {
         let context = try makeContext()
         let schedule = makeSchedule(
@@ -354,6 +391,7 @@ private final class FakeCalendarEventWriter: CalendarEventWriting {
     var requestCount = 0
     var saveAttemptCount = 0
     var savedEvents: [CalendarEventDraft] = []
+    var onRequest: (() throws -> Void)?
     var onSave: (() -> Void)?
 
     init(access: CalendarAuthorizationAccess = .writeOnly) {
@@ -363,6 +401,7 @@ private final class FakeCalendarEventWriter: CalendarEventWriting {
 
     func requestWriteOnlyAccess() async throws -> CalendarAuthorizationAccess {
         requestCount += 1
+        try onRequest?()
         if let requestError { throw requestError }
         access = requestResult
         return requestResult

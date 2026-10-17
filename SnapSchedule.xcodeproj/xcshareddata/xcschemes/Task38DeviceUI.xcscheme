@@ -12,8 +12,8 @@
    <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="388000000000000000000040" BuildableName="SnapScheduleUITests.xctest" BlueprintName="SnapScheduleUITests" ReferencedContainer="container:SnapSchedule.xcodeproj"/>
   </TestableReference></Testables>
   <EnvironmentVariables>
-   <EnvironmentVariable key="TASK38_UI_VALIDATION" value="1" isEnabled="YES"/>
-   <EnvironmentVariable key="TASK38_UI_DEVICE_UDID" value="00000000-0000000000000000" isEnabled="YES"/>
+   <EnvironmentVariable key="TASK38_UI_VALIDATION" value="1" isEnabled="NO"/>
+   <EnvironmentVariable key="TASK38_UI_DEVICE_UDID" value="00000000-0000000000000000" isEnabled="NO"/>
   </EnvironmentVariables>
  </TestAction>
 </Scheme>

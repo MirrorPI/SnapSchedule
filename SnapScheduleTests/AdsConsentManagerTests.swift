@@ -2,6 +2,9 @@ import XCTest
 import GoogleMobileAds
 import SwiftUI
 import UIKit
+import AppTrackingTransparency
+import Photos
+import EventKit
 @testable import SnapSchedule
 
 @MainActor
@@ -11,9 +14,105 @@ final class AdsConsentManagerTests: XCTestCase {
         AdsConfiguration.resolve(environment: .debug, appID: "ca-app-pub-3940256099942544~1458002511",
             bannerID: "ca-app-pub-3940256099942544/2435281174")
     }
+
+    func testDeniedAndRestrictedTrackingNeverContactsGoogleEvenOnRetry() {
+        for status: ATTrackingManager.AuthorizationStatus in [.denied, .restricted] {
+            let sdk = ConsentSDKDouble()
+            let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary,
+                tracking: .init(status: { status }, request: { _ in XCTFail("Cannot reprompt a decided permission") }))
+            manager.setHomePresentation(isSafe: { true })
+            manager.activate()
+            manager.retry()
+            manager.presentPrivacyOptions()
+            manager.homeBecameAvailable()
+            XCTAssertTrue(sdk.updates.isEmpty)
+            XCTAssertTrue(sdk.starts.isEmpty)
+            XCTAssertTrue(sdk.options.isEmpty)
+            XCTAssertFalse(manager.canRequestAds)
+            XCTAssertNil(manager.makeRequest())
+        }
+    }
+
+    func testTrackingPromptWaitsForSafeHomeAndSDKWaitsForAuthorization() {
+        let sdk = ConsentSDKDouble()
+        var status = ATTrackingManager.AuthorizationStatus.notDetermined
+        var completion: (@MainActor () -> Void)?
+        var prompts = 0
+        var safe = false
+        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary,
+            tracking: .init(status: { status }, request: { prompts += 1; completion = $0 }))
+        manager.setHomePresentation(isSafe: { safe })
+        manager.activate()
+        XCTAssertTrue(sdk.updates.isEmpty)
+        XCTAssertEqual(prompts, 0)
+        safe = true
+        manager.homeBecameAvailable()
+        manager.activate()
+        XCTAssertEqual(prompts, 1)
+        XCTAssertTrue(sdk.updates.isEmpty)
+        status = .authorized
+        completion?()
+        completion?()
+        XCTAssertEqual(sdk.updates.count, 1)
+        sdk.snapshot = .init(canRequestAds: true, formRequired: false, privacyOptionsRequired: false)
+        sdk.updates.first?(nil)
+        XCTAssertEqual(sdk.starts.count, 1)
+        sdk.starts.first?()
+        XCTAssertTrue(manager.canRequestAds)
+    }
+
+    func testTrackingDenialAfterPromptLeavesGoogleUncontacted() {
+        let sdk = ConsentSDKDouble()
+        var status = ATTrackingManager.AuthorizationStatus.notDetermined
+        var completion: (@MainActor () -> Void)?
+        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary,
+            tracking: .init(status: { status }, request: { completion = $0 }))
+        manager.setHomePresentation(isSafe: { true })
+        manager.activate()
+        status = .denied
+        completion?()
+        manager.activate()
+        manager.retry()
+        XCTAssertTrue(sdk.updates.isEmpty)
+        XCTAssertTrue(sdk.starts.isEmpty)
+        XCTAssertFalse(manager.isBusy)
+        XCTAssertFalse(manager.canRequestAds)
+    }
+
+    func testTrackingRevocationRejectsLateSDKCallbacksAndRequests() {
+        let sdk = ConsentSDKDouble()
+        var status = ATTrackingManager.AuthorizationStatus.authorized
+        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary,
+            tracking: .init(status: { status }, request: { _ in XCTFail("Already decided") }))
+        manager.activate()
+        sdk.snapshot = .init(canRequestAds: true, formRequired: false, privacyOptionsRequired: true)
+        status = .denied
+        sdk.updates.first?(nil)
+        XCTAssertTrue(sdk.starts.isEmpty)
+        manager.activate()
+        manager.presentPrivacyOptions()
+        XCTAssertTrue(sdk.options.isEmpty)
+        XCTAssertFalse(manager.canRequestAds)
+        XCTAssertNil(manager.makeRequest())
+    }
+
+    func testAuthorizedSDKInitializationSurvivesConcurrentPrivacyOptions() {
+        let sdk = ConsentSDKDouble()
+        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary,
+            tracking: .init(status: { .authorized }, request: { _ in XCTFail("Already authorized") }))
+        manager.activate()
+        sdk.snapshot = .init(canRequestAds: true, formRequired: false, privacyOptionsRequired: true)
+        sdk.updates.first?(nil)
+        manager.presentPrivacyOptions()
+        sdk.starts.first?()
+        XCTAssertFalse(manager.canRequestAds)
+        sdk.options.first?(nil)
+        XCTAssertTrue(manager.canRequestAds)
+        XCTAssertEqual(sdk.starts.count, 1)
+    }
     func testNoPermissionBeforeUpdateAndDuplicateCallbacksStartOnlyOnce() {
         let sdk = ConsentSDKDouble()
-        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary)
+        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary, tracking: .init(status: { .authorized }, request: { _ in XCTFail("Already authorized") }))
         XCTAssertFalse(manager.canRequestAds)
         manager.activate()
         manager.activate()
@@ -34,7 +133,7 @@ final class AdsConsentManagerTests: XCTestCase {
 
     func testFormWaitsForSafeHomeIncludingNavigationDuringLoad() {
         let sdk = ConsentSDKDouble()
-        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary)
+        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary, tracking: .init(status: { .authorized }, request: { _ in XCTFail("Already authorized") }))
         var safe = false
         manager.setHomePresentation(isSafe: { safe })
         manager.activate()
@@ -63,7 +162,7 @@ final class AdsConsentManagerTests: XCTestCase {
 
     func testPrivacyChangeInvalidatesBannerBeforePresentationAndRejectsLateCallbacks() {
         let sdk = ConsentSDKDouble()
-        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary)
+        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary, tracking: .init(status: { .authorized }, request: { _ in XCTFail("Already authorized") }))
         manager.activate()
         sdk.snapshot = .init(canRequestAds: true, formRequired: false, privacyOptionsRequired: true)
         sdk.updates[0](nil)
@@ -84,7 +183,7 @@ final class AdsConsentManagerTests: XCTestCase {
 
     func testOfflineWithoutSDKPermissionStaysUnavailableButRetryWorks() {
         let sdk = ConsentSDKDouble()
-        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary)
+        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary, tracking: .init(status: { .authorized }, request: { _ in XCTFail("Already authorized") }))
         manager.activate()
         sdk.updates[0](NSError(domain: "offline", code: -1009))
         XCTAssertFalse(manager.canRequestAds)
@@ -100,7 +199,7 @@ final class AdsConsentManagerTests: XCTestCase {
 
     func testOfflineUsesSDKPreviousConsentAndRechecksLivePermission() {
         let sdk = ConsentSDKDouble()
-        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary)
+        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary, tracking: .init(status: { .authorized }, request: { _ in XCTFail("Already authorized") }))
         manager.activate()
         sdk.snapshot = .init(canRequestAds: true, formRequired: false, privacyOptionsRequired: true)
         sdk.updates[0](NSError(domain: "offline", code: -1009))
@@ -114,7 +213,7 @@ final class AdsConsentManagerTests: XCTestCase {
 
     func testFormErrorAndPrivacyCancellationFollowSDKNotErrorOrStoredBoolean() {
         let sdk = ConsentSDKDouble()
-        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary)
+        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary, tracking: .init(status: { .authorized }, request: { _ in XCTFail("Already authorized") }))
         manager.setHomePresentation(isSafe: { true })
         manager.activate()
         sdk.snapshot = .init(canRequestAds: false, formRequired: true, privacyOptionsRequired: true)
@@ -132,7 +231,7 @@ final class AdsConsentManagerTests: XCTestCase {
 
     func testSDKInitializationCompletionCannotRestoreRevokedPermission() {
         let sdk = ConsentSDKDouble()
-        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary)
+        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary, tracking: .init(status: { .authorized }, request: { _ in XCTFail("Already authorized") }))
         manager.activate()
         sdk.snapshot = .init(canRequestAds: true, formRequired: false, privacyOptionsRequired: true)
         sdk.updates[0](nil)
@@ -148,7 +247,7 @@ final class AdsConsentManagerTests: XCTestCase {
 
     func testRequestFactoryRequiresLivePermissionAndAlwaysDisablesPersonalization() throws {
         let sdk = ConsentSDKDouble()
-        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary)
+        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary, tracking: .init(status: { .authorized }, request: { _ in XCTFail("Already authorized") }))
         XCTAssertNil(manager.makeRequest())
         manager.activate()
         sdk.snapshot = .init(canRequestAds: true, formRequired: false, privacyOptionsRequired: true)
@@ -171,7 +270,7 @@ final class AdsConsentManagerTests: XCTestCase {
             throw XCTSkip("Configured ad Settings UI is outside the intentionally disabled Task42-1 test host")
         }
         let sdk = ConsentSDKDouble()
-        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary)
+        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary, tracking: .init(status: { .authorized }, request: { _ in XCTFail("Already authorized") }))
         manager.activate()
         sdk.snapshot = .init(canRequestAds: false, formRequired: false, privacyOptionsRequired: true)
         sdk.updates[0](NSError(domain: "offline", code: -1009))
@@ -218,8 +317,10 @@ final class AdsConsentManagerTests: XCTestCase {
 
     func testPendingFormResumesAfterActualSheetDismissal() async throws {
         let sdk = ConsentSDKDouble()
-        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary)
-        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let manager = AdsConsentManager(configuration: consentFixtureConfiguration, sdk: sdk.boundary, tracking: .init(status: { .authorized }, request: { _ in XCTFail("Already authorized") }))
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = try XCTUnwrap(scenes.first { $0.activationState == .foregroundActive }
+            ?? scenes.first { $0.activationState == .foregroundInactive })
         let previous = scene.windows.first { $0.isKeyWindow }
         let host = AdsConsentHomeHost.Host(manager: manager)
         host.eligible = true
@@ -227,12 +328,26 @@ final class AdsConsentManagerTests: XCTestCase {
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer { window.isHidden = true; window.rootViewController = nil; previous?.makeKeyAndVisible() }
-        try await Task.sleep(for: .milliseconds(200))
-        XCTAssertEqual(sdk.updates.count, 1)
+        func ready() -> Bool {
+            host.visible && host.eligible && host.viewIfLoaded?.window != nil
+                && scene.activationState == .foregroundActive
+                && host.presentedViewController == nil && !host.isBeingDismissed
+        }
+        func readiness() -> String {
+            print("SecurityFixture authorization ATT=\(ATTrackingManager.trackingAuthorizationStatus.rawValue) Photos=\(PHPhotoLibrary.authorizationStatus(for: .readWrite).rawValue) Calendar=\(EKEventStore.authorizationStatus(for: .event).rawValue) sharedBusy=\(AdsConsentManager.shared.isBusy) sharedState=\(AdsConsentManager.shared.state)")
+            return
+            "app=\(UIApplication.shared.applicationState.rawValue) scene=\(scene.activationState.rawValue) visible=\(host.visible) key=\(window.isKeyWindow) hidden=\(window.isHidden) attached=\(host.viewIfLoaded?.window != nil) presented=\(String(describing: host.presentedViewController)) cover=\(scene.windows.contains { $0.accessibilityIdentifier == "AppSnapshotPrivacyShield" && !$0.isHidden })"
+        }
+        for _ in 0..<150 {
+            if sdk.updates.count == 1 && ready() { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertTrue(ready(), readiness())
+        XCTAssertEqual(sdk.updates.count, 1, readiness())
         guard sdk.updates.count == 1 else { return }
         sdk.snapshot = .init(canRequestAds: false, formRequired: true, privacyOptionsRequired: true)
         sdk.updates[0](nil)
-        XCTAssertEqual(sdk.loads.count, 1)
+        XCTAssertEqual(sdk.loads.count, 1, readiness())
         guard sdk.loads.count == 1 else { return }
         let settingsSheet = UIViewController()
         settingsSheet.modalPresentationStyle = .pageSheet
@@ -245,18 +360,21 @@ final class AdsConsentManagerTests: XCTestCase {
         XCTAssertEqual(presentations, 0)
         // Same completion hook used by Home's SwiftUI Settings sheet.
         let dismissed = expectation(description: "Settings sheet dismissed")
-        host.dismiss(animated: false) {
-            manager.homeBecameAvailable()
-            dismissed.fulfill()
-        }
+        host.dismiss(animated: false) { dismissed.fulfill() }
         await fulfillment(of: [dismissed], timeout: 3)
+        for _ in 0..<150 {
+            if ready() { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertTrue(ready(), readiness())
+        manager.homeBecameAvailable()
         XCTAssertEqual(presentations, 1, "visible=\(host.visible) eligible=\(host.eligible) window=\(host.viewIfLoaded?.window != nil) scene=\(scene.activationState.rawValue) presented=\(String(describing: host.presentedViewController)) dismissing=\(host.isBeingDismissed)")
     }
 
     func testDisabledConfigurationNeverContactsSDK() {
         let sdk = ConsentSDKDouble()
         let config = AdsConfiguration.resolve(environment: .production, appID: nil, bannerID: nil)
-        let manager = AdsConsentManager(configuration: config, sdk: sdk.boundary)
+        let manager = AdsConsentManager(configuration: config, sdk: sdk.boundary, tracking: .init(status: { .authorized }, request: { _ in XCTFail("Already authorized") }))
         manager.activate()
         manager.retry()
         manager.presentPrivacyOptions()

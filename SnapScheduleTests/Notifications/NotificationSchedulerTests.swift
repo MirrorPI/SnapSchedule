@@ -6,10 +6,60 @@ import UserNotifications
 import XCTest
 @testable import SnapSchedule
 
+// Existing notification test doubles without delivered fixtures have an empty inbox.
+extension NotificationCenterScheduling {
+    func deliveredRequests() async -> [UNNotificationRequest] { [] }
+    func removeDeliveredRequests(withIdentifiers identifiers: [String]) {}
+}
+
 @MainActor
 final class NotificationSchedulerTests: XCTestCase {
     private let seoul = TimeZone(identifier: "Asia/Seoul")!
     private let now = Date(timeIntervalSince1970: 1_798_761_600) // 2027-01-01 00:00:00 UTC
+
+    func testDeletingScheduleRemovesDeliveredPrivateNotificationsAndKeepsUnrelatedRequests() async {
+        let schedule = makeSchedule(id: id(42), daysAfterNow: 2, notifyDayBefore: true)
+        let request = NotificationScheduler.request(for: ReminderPlanner.plan(for: schedule, now: now).reminders[0])
+        let unrelated = UNNotificationRequest(identifier: "unrelated", content: UNMutableNotificationContent(), trigger: nil)
+        let center = InMemoryNotificationCenter()
+        center.delivered = [request, unrelated]
+        _ = await NotificationScheduler(center: center, now: { self.now }).synchronize(schedules: [], access: .authorized)
+        XCTAssertEqual(center.delivered.map(\.identifier), ["unrelated"], "Deleting a schedule must remove its already-delivered private title")
+    }
+
+    func testEditingTitleOrDisablingRemindersRemovesObsoleteDeliveredTitles() async {
+        let changed = makeSchedule(id: id(41), title: "Old private title", daysAfterNow: 2, notifyDayBefore: true)
+        let disabled = makeSchedule(id: id(42), daysAfterNow: 2, notifyDayBefore: true)
+        let unchanged = makeSchedule(id: id(43), daysAfterNow: 2, notifyDayBefore: true)
+        let center = InMemoryNotificationCenter()
+        center.delivered = [changed, disabled, unchanged].map {
+            NotificationScheduler.request(for: ReminderPlanner.plan(for: $0, now: now).reminders[0])
+        }
+        let keptID = center.delivered[2].identifier
+        changed.title = "Updated title"
+        disabled.notifyDayBefore = false
+        _ = await NotificationScheduler(center: center, now: { self.now }).synchronize(schedules: [changed, disabled, unchanged], access: .authorized)
+        XCTAssertEqual(center.delivered.map(\.identifier), [keptID])
+    }
+
+    func testDateTimeEditsRemoveObsoleteDeliveredRemindersButKeepUnchangedHistory() async {
+        let changedDate = makeSchedule(id: id(44), daysAfterNow: 2, notifySameDay: true)
+        let changedTime = makeSchedule(id: id(45), daysAfterNow: 2, notifySameDay: true)
+        let unchanged = makeSchedule(id: id(46), daysAfterNow: 2, notifySameDay: true)
+        let center = InMemoryNotificationCenter()
+        center.delivered = [changedDate, changedTime, unchanged].map {
+            NotificationScheduler.request(for: ReminderPlanner.plan(for: $0, now: now).reminders[0])
+        }
+        let kept = center.delivered[2].identifier
+        changedDate.date = CalendarDate(year: 2027, month: 2, day: 15)
+        changedTime.time = ClockTime(hour: 18, minute: 30)
+        // Synchronize after the original delivery time: unchanged historical
+        // notifications must survive even when the future planner excludes them.
+        let afterDelivery = expectedFireDate(daysAfterNow: 3)
+        _ = await NotificationScheduler(center: center, now: { afterDelivery }).synchronize(
+            schedules: [changedDate, changedTime, unchanged], access: .authorized)
+        XCTAssertEqual(center.delivered.map(\.identifier), [kept])
+    }
 
     func testDeniedEmptyScheduleListStillReportsUnavailableAuthorization() async {
         let scheduler = NotificationScheduler(center: InMemoryNotificationCenter(), now: { self.now })
@@ -431,7 +481,7 @@ final class NotificationSchedulerTests: XCTestCase {
     }
 
     func testHomeKeepsNotificationPendingUntilSceneBecomesActive() async throws {
-        let container = try SnapScheduleModelContainer.makeInMemory()
+        let container = try makeHostingContainer()
         let context = container.mainContext
         let schedule = makeSchedule(id: id(42), daysAfterNow: 1)
         context.insert(schedule)
@@ -447,10 +497,17 @@ final class NotificationSchedulerTests: XCTestCase {
                 .modelContainer(container)
                 .environment(\.scenePhase, .inactive)
         )
+        let previousWindow = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows).first { $0.isKeyWindow }
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.rootViewController = controller
         window.makeKeyAndVisible()
-        defer { window.isHidden = true; coordinator.cancel() }
+        defer {
+            coordinator.cancel()
+            window.isHidden = true
+            window.rootViewController = nil
+            previousWindow?.makeKeyAndVisible()
+        }
         controller.view.layoutIfNeeded()
         try await Task.sleep(for: .seconds(1))
 
@@ -459,7 +516,7 @@ final class NotificationSchedulerTests: XCTestCase {
     }
 
     func testActivationRoutesPendingNotificationWithoutWaitingForScreenshotAnalysis() async throws {
-        let container = try SnapScheduleModelContainer.makeInMemory()
+        let container = try makeHostingContainer()
         let context = container.mainContext
         let schedule = makeSchedule(id: id(42), daysAfterNow: 1)
         context.insert(schedule)
@@ -478,10 +535,17 @@ final class NotificationSchedulerTests: XCTestCase {
                 .modelContainer(container)
                 .environment(\.scenePhase, .background)
         )
+        let previousWindow = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows).first { $0.isKeyWindow }
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.rootViewController = controller
         window.makeKeyAndVisible()
-        defer { window.isHidden = true; coordinator.cancel() }
+        defer {
+            coordinator.cancel()
+            window.isHidden = true
+            window.rootViewController = nil
+            previousWindow?.makeKeyAndVisible()
+        }
         controller.view.layoutIfNeeded()
         try await Task.sleep(for: .seconds(0.5))
         XCTAssertEqual(store.destination?.scheduleID, schedule.id)
@@ -491,11 +555,23 @@ final class NotificationSchedulerTests: XCTestCase {
             .environment(\.scenePhase, .active)
         try await Task.sleep(for: .seconds(1))
         XCTAssertNil(store.destination, "An unrelated analysis must not delay the notification route.")
-        XCTAssertTrue(accessibilityLabels(in: controller.view).contains(String(localized: "Edit")))
+        // The route is already consumed above. Wait for UIKit to publish its
+        // rendered accessibility tree rather than inspecting a stale snapshot.
+        var renderedLabels = Set<String>()
+        for _ in 0..<30 {
+            controller.view.layoutIfNeeded()
+            _ = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
+                controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+            }
+            renderedLabels = Set(accessibilityLabels(in: controller.view))
+            if renderedLabels.contains(String(localized: "Edit")) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertTrue(renderedLabels.contains(String(localized: "Edit")), "Rendered route labels: \(renderedLabels)")
     }
 
     func testNotificationLeavesSettingsBeforeShowingSchedule() async throws {
-        let container = try SnapScheduleModelContainer.makeInMemory()
+        let container = try makeHostingContainer()
         let context = container.mainContext
         context.insert(makeSchedule(id: id(42), daysAfterNow: 1))
         try context.save()
@@ -510,10 +586,17 @@ final class NotificationSchedulerTests: XCTestCase {
                 .modelContainer(container)
                 .environment(\.scenePhase, .active)
         )
+        let previousWindow = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows).first { $0.isKeyWindow }
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.rootViewController = controller
         window.makeKeyAndVisible()
-        defer { window.isHidden = true; coordinator.cancel() }
+        defer {
+            coordinator.cancel()
+            window.isHidden = true
+            window.rootViewController = nil
+            previousWindow?.makeKeyAndVisible()
+        }
         controller.view.layoutIfNeeded()
         try await Task.sleep(for: .seconds(0.5))
         navigation.tab = .settings
@@ -524,7 +607,17 @@ final class NotificationSchedulerTests: XCTestCase {
         try await Task.sleep(for: .seconds(1))
         XCTAssertEqual(navigation.tab, .home, "Settings must not cover the requested schedule.")
         XCTAssertEqual(navigation.scheduleDetailID, id(42))
-        XCTAssertTrue(accessibilityLabels(in: controller.view).contains(String(localized: "Edit")))
+        let labelsBeforeRender = accessibilityLabels(in: controller.view)
+        controller.view.layoutIfNeeded()
+        let attachment = XCTAttachment(image: UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
+            controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+        })
+        attachment.name = "notification-settings-to-detail"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        let labels = accessibilityLabels(in: controller.view)
+        print("Route labels before render: \(labelsBeforeRender); after render: \(labels)")
+        XCTAssertTrue(labels.contains(String(localized: "Edit")), "Visible route labels: \(labels)")
     }
 
     func testColdHomeOpensStoredNotificationSchedule() async throws {
@@ -551,7 +644,7 @@ final class NotificationSchedulerTests: XCTestCase {
         payload: [AnyHashable: Any], receiveBeforeLaunch: Bool, opensDetail: Bool,
         file: StaticString = #filePath, line: UInt = #line
     ) async throws {
-        let container = try SnapScheduleModelContainer.makeInMemory()
+        let container = try makeHostingContainer()
         let context = container.mainContext
         context.insert(makeSchedule(id: id(42), title: "Notification route fixture", daysAfterNow: 1))
         try context.save()
@@ -566,10 +659,17 @@ final class NotificationSchedulerTests: XCTestCase {
                 .modelContainer(container)
                 .environment(\.scenePhase, .active)
         )
+        let previousWindow = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows).first { $0.isKeyWindow }
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.rootViewController = controller
         window.makeKeyAndVisible()
-        defer { window.isHidden = true; coordinator.cancel() }
+        defer {
+            coordinator.cancel()
+            window.isHidden = true
+            window.rootViewController = nil
+            previousWindow?.makeKeyAndVisible()
+        }
         controller.view.layoutIfNeeded()
         if !receiveBeforeLaunch {
             try await Task.sleep(for: .seconds(0.5))
@@ -596,6 +696,15 @@ final class NotificationSchedulerTests: XCTestCase {
             XCTAssertTrue(labels.contains(String(localized: "Settings")), "\(labels)", file: file, line: line)
             XCTAssertFalse(labels.contains(String(localized: "Edit")), file: file, line: line)
         }
+    }
+
+    // Keep stores alive while SwiftUI's detached test @Query observers wind down.
+    // The shipping app owns one long-lived container; each hosting test creates one.
+    private static var hostingContainers: [ModelContainer] = []
+    private func makeHostingContainer() throws -> ModelContainer {
+        let container = try SnapScheduleModelContainer.makeInMemory()
+        Self.hostingContainers.append(container)
+        return container
     }
 
     private func accessibilityLabels(in view: UIView) -> [String] {
@@ -687,6 +796,7 @@ private final class InMemoryNotificationCenter: NotificationCenterScheduling {
     private enum TestError: Error { case addFailed }
 
     var pending: [UNNotificationRequest]
+    var delivered: [UNNotificationRequest] = []
     let silentlyDroppedIDs: Set<String>
     var failingIDs: Set<String> = []
     var holdsNextPendingRead = false
@@ -708,6 +818,12 @@ private final class InMemoryNotificationCenter: NotificationCenterScheduling {
             await withCheckedContinuation { pendingReadContinuation = $0 }
         }
         return pending
+    }
+
+    func deliveredRequests() async -> [UNNotificationRequest] { delivered }
+
+    func removeDeliveredRequests(withIdentifiers identifiers: [String]) {
+        delivered.removeAll { identifiers.contains($0.identifier) }
     }
 
     func add(_ request: UNNotificationRequest) async throws {

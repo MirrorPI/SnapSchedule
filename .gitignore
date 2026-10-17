@@ -52,3 +52,17 @@
 **/*.log
 **/node_modules/
 **/.openai/
+
+# Additional private identities and distribution diagnostics.
+**/*.keystore
+**/*.jks
+**/*.der
+**/*.trace/
+**/*.dSYM/
+**/Secrets.xcconfig
+**/secrets.*
+**/ExportOptions*.plist
+**/*UploadOptions.plist
+**/*ExportOptions.plist
+**/*.mp4
+**/*.mov

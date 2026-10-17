@@ -10,6 +10,7 @@ struct RecognizedTextFragment: Equatable, Sendable {
 
 enum TextRecognitionError: Error, Equatable, Sendable {
     case cancelled
+    case inputTooLarge
     case failed(domain: String, code: Int)
 }
 
@@ -40,6 +41,9 @@ final class TextRecognitionService: Sendable {
     func recognize(
         _ input: ScreenshotImageInput
     ) async throws -> [RecognizedTextFragment] {
+        guard !input.exceedsProcessingLimits else {
+            throw TextRecognitionError.inputTooLarge
+        }
         let work = makeWork(input)
         let worker = Task.detached(priority: .userInitiated) {
             try work.perform()
@@ -53,6 +57,9 @@ final class TextRecognitionService: Sendable {
                 work.cancel()
             }
             try Task.checkCancellation()
+            guard DateTimeParser.acceptsInput(fragments) else {
+                throw TextRecognitionError.inputTooLarge
+            }
             return Self.readingOrder(fragments)
         } catch is CancellationError {
             throw TextRecognitionError.cancelled

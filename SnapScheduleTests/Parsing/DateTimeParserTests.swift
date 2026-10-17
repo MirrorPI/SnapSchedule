@@ -6,6 +6,28 @@ import XCTest
 final class DateTimeParserTests: XCTestCase {
     private let seoul = TimeZone(identifier: "Asia/Seoul")!
 
+
+    func testOversizedOCRIsRejectedWithoutReturningAPartialDate() {
+        let inputs = [
+            [fragment("Meeting 2026-10-08 " + String(repeating: "x", count: 8_001), y: 0.5)],
+            [fragment("Meeting 2026-10-08 " + String(repeating: "👩🏽‍💻", count: 1_200), y: 0.5)],
+            [fragment("Meeting 2026-10-08", y: 0.8), fragment(String(repeating: "x", count: 8_000), y: 0.5)],
+            (0..<257).map { _ in fragment("Meeting 2026-10-08", y: 0.5) },
+        ]
+        for fragments in inputs {
+            let result = DateTimeParser().parse(fragments: fragments, captureDate: nil,
+                analysisDate: makeDate(2026, 10, 7), timeZone: seoul)
+            XCTAssertTrue(result.isEmpty, "An oversized image must not produce a misleading partial schedule")
+        }
+    }
+
+    func testNormalOCRNearTheTextBudgetStillPreservesItsDate() {
+        let text = "Meeting 2026-10-08 " + String(repeating: "x", count: 7_900)
+        let result = DateTimeParser().parse(fragments: [fragment(text, y: 0.5)], captureDate: nil,
+            analysisDate: makeDate(2026, 10, 7), timeZone: seoul)
+        XCTAssertEqual(result.compactMap(\.date), [CalendarDate(year: 2026, month: 10, day: 8)])
+    }
+
     func testDeadlineBeforeOrdinalSurvivesContestWordsAndDistinctNamedContestsNeverMerge() {
         for text in ["Submission due the 8th for Photo Contest", "Deadline: the 8th for the competition", "Deadline is the 8th for the film festival"] {
             let drafts = DateTimeParser().parse(fragments: [fragment(text, y: 0.6)], captureDate: nil,

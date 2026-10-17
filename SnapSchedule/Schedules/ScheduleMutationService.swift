@@ -34,6 +34,7 @@ enum ScheduleMutationKind: Equatable, Sendable {
 struct ScheduleMutationResult: Equatable, Sendable {
     let scheduleID: UUID
     let kind: ScheduleMutationKind
+    var widgetRefreshFailed: Bool = false
 }
 
 enum ScheduleMutationError: Error, Equatable {
@@ -65,8 +66,15 @@ final class ScheduleMutationService {
         self.now = now
         self.save = save
         self.widgetSnapshotRefresh = widgetSnapshotRefresh ?? {
-            let schedules = try context.fetch(FetchDescriptor<Schedule>())
-            _ = try WidgetSnapshotStore().write(schedules: schedules)
+            let store = WidgetSnapshotStore()
+            let schedules: [Schedule]
+            do {
+                schedules = try context.fetch(FetchDescriptor<Schedule>())
+            } catch {
+                try store.invalidate()
+                throw error
+            }
+            _ = try store.write(schedules: schedules)
         }
     }
 
@@ -94,13 +102,12 @@ final class ScheduleMutationService {
 
         do {
             try save(context)
-            try? widgetSnapshotRefresh()
-            return ScheduleMutationResult(scheduleID: scheduleID, kind: .updated)
         } catch {
             original.restore(to: schedule)
             context.rollback()
             throw ScheduleMutationError.saveFailed
         }
+        return resultAfterWidgetRefresh(scheduleID: scheduleID, kind: .updated)
     }
 
     func delete(scheduleID: UUID) throws -> ScheduleMutationResult {
@@ -108,11 +115,23 @@ final class ScheduleMutationService {
         context.delete(schedule)
         do {
             try save(context)
-            try? widgetSnapshotRefresh()
-            return ScheduleMutationResult(scheduleID: scheduleID, kind: .deleted)
         } catch {
             context.rollback()
             throw ScheduleMutationError.saveFailed
+        }
+        return resultAfterWidgetRefresh(scheduleID: scheduleID, kind: .deleted)
+    }
+
+    func retryWidgetSnapshotRefresh() throws {
+        try widgetSnapshotRefresh()
+    }
+
+    private func resultAfterWidgetRefresh(scheduleID: UUID, kind: ScheduleMutationKind) -> ScheduleMutationResult {
+        do {
+            try widgetSnapshotRefresh()
+            return ScheduleMutationResult(scheduleID: scheduleID, kind: kind)
+        } catch {
+            return ScheduleMutationResult(scheduleID: scheduleID, kind: kind, widgetRefreshFailed: true)
         }
     }
 

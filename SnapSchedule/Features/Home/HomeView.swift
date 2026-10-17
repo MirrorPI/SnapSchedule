@@ -43,6 +43,7 @@ struct HomeView: View {
     @State private var presentationDate = Date.now
     @State private var deviceTimeZone = TimeZone.current
     @State private var selectedCalendarDate = CalendarDate.gregorianDate(from: .now)
+    @State private var widgetRefreshFailed = false
     @State private var calendarRecoveryMessage: String?
     @State private var compactTypography = false
     @State private var isResumingCalendarExports = false
@@ -142,10 +143,17 @@ struct HomeView: View {
             SettingsView(notificationAuthorization: notificationAuthorization, managesNotificationAuthorization: false,
                 photoAuthorization: photoAuthorization, adsConsent: adsConsent,
                 notificationScheduler: notificationScheduler,
-                notificationScheduleQueryFailed: notificationScheduleQueryFailed, showsDismissButton: false)
+                notificationScheduleQueryFailed: notificationScheduleQueryFailed, showsDismissButton: false,
+                eraseAnalysis: {
+                    try await scanCoordinator.eraseScreenshotAnalysis()
+                    navigation.candidateWillLeave = nil
+                    navigation.candidateDetailID = nil
+                    candidateSelectionState = CandidateSelectionState()
+                })
                 .tabItem { Label(String(localized: "Settings"), systemImage: "gearshape") }
                 .tag(AppTab.settings)
         }
+        .environment(\.reportWidgetRefreshFailure, { widgetRefreshFailed = true })
         .tint(navigation.tab == .candidates ? reviewStatus.color : SnapScheduleStyle.action)
         .onChange(of: navigation.tab) { _, tab in
             if tab != .home { bannerController.stop() }
@@ -209,90 +217,12 @@ struct HomeView: View {
 
     private var homeTab: some View {
         NavigationStack {
-            GeometryReader { geometry in
-                let layout = AdaptiveBannerLayout(size: geometry.size, safeAreaInsets: geometry.safeAreaInsets)
-                VStack(spacing: 0) {
-                    AdaptiveBannerView(controller: bannerController, reservedHeight: layout.height)
-                        .frame(width: layout.width)
-                        .frame(maxWidth: .infinity)
-                        .accessibilityIdentifier("home-ad-placement")
-                    List {
-                        Section {
-                            if let calendarRecoveryMessage {
-                                Label(calendarRecoveryMessage, systemImage: "exclamationmark.triangle")
-                                    .foregroundStyle(.orange)
-                            }
-                            HomeCalendarView(
-                                originals: calendarOriginals,
-                                selectedDate: $selectedCalendarDate,
-                                timeZone: deviceTimeZone
-                            )
-                            .frame(maxWidth: 420, minHeight: 330)
-                            .frame(maxWidth: .infinity)
-                            .accessibilityIdentifier("home-calendar")
-                            .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 8, trailing: 8))
-                            .listRowSeparator(.hidden)
-                        } header: {
-                            SnapSectionTitle(title: String(localized: "SnapSchedule calendar"), symbol: "calendar")
-                        }
-
-                        Section {
-                            if selectedDateSchedules.isEmpty {
-                                ContentUnavailableView(
-                                    String(localized: "No schedules on this date"),
-                                    systemImage: "calendar.badge.minus"
-                                )
-                            } else {
-                                ForEach(selectedOriginalSchedules) { registered in
-                                    VStack(alignment: .leading, spacing: 12) {
-                                        if let presentation = selectedDateSchedules.first(where: { $0.id == registered.id }) {
-                                            scheduleRow(presentation)
-                                        }
-                                        ScreenshotLinkedOriginal(sourceScreenshotIdentifier: registered.sourceAssetIdentifier,
-                                            scheduleID: registered.id, title: registered.title,
-                                            onOpen: { navigation.scheduleDetailID = registered.id })
-                                    }
-                                    .padding(.vertical, 12)
-                                    .listRowBackground(Color.clear)
-                                    .listRowSeparator(.hidden)
-                                }
-                            }
-                        } header: {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(selectedDateTitle)
-                                    .font(.headline)
-                                    .foregroundStyle(.primary)
-                                Text(String(localized: "\(selectedOriginalSchedules.count) registered schedules")
-                                    + " · " + String(localized: "Registration order"))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .textCase(nil)
-                            .accessibilityElement(children: .combine)
-                        }
-
-                        Section {
-                            if upcomingSchedules.isEmpty {
-                                ContentUnavailableView(
-                                    String(localized: "No upcoming schedules"),
-                                    systemImage: "calendar",
-                                    description: Text(String(localized: "Registered future schedules will appear here."))
-                                )
-                            } else {
-                                ForEach(upcomingSchedules) { schedule in
-                                    scheduleRow(schedule)
-                                }
-                            }
-                        } header: {
-                            SnapSectionTitle(title: String(localized: "Upcoming schedules"), symbol: "clock")
-                        }
-                    }
-                    .listStyle(.plain)
-                    .listSectionSpacing(20)
+            Group {
+                if photoAuthorization.access == .notDetermined {
+                    PhotoOnboardingView(authorization: photoAuthorization)
+                } else {
+                    homeCalendarContent
                 }
-                .modifier(AdaptiveBannerLifecycle(manager: adsConsent, controller: bannerController,
-                    eligible: homeAdsEligible, layout: layout))
-                .background(AdsConsentHomeHost(manager: adsConsent, eligible: homeAdsEligible))
             }
             // Home has no text entry. Keyboard transitions in another tab/sheet
             // must not masquerade as a screen rotation and change the ad placement.
@@ -304,6 +234,101 @@ struct HomeView: View {
                     notificationAuthorization: notificationAuthorization,
                     notificationScheduler: notificationScheduler)
             }
+        }
+    }
+
+    private var homeCalendarContent: some View {
+        GeometryReader { geometry in
+            let layout = AdaptiveBannerLayout(size: geometry.size, safeAreaInsets: geometry.safeAreaInsets)
+            VStack(spacing: 0) {
+                AdaptiveBannerView(controller: bannerController, reservedHeight: layout.height)
+                    .frame(width: layout.width)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("home-ad-placement")
+                List {
+                    Section {
+                        if widgetRefreshFailed {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Label(String(localized: "Your schedule change is saved. The widget could not refresh. Its previous display may remain until iOS reloads it."), systemImage: "exclamationmark.triangle")
+                                Button(String(localized: "Retry Widget Refresh")) { refreshWidgetSnapshot() }
+                            }
+                            .foregroundStyle(.orange)
+                        }
+                        if let calendarRecoveryMessage {
+                            Label(calendarRecoveryMessage, systemImage: "exclamationmark.triangle")
+                                .foregroundStyle(.orange)
+                        }
+                        HomeCalendarView(
+                            originals: calendarOriginals,
+                            selectedDate: $selectedCalendarDate,
+                            timeZone: deviceTimeZone
+                        )
+                        .frame(maxWidth: 420, minHeight: 330)
+                        .frame(maxWidth: .infinity)
+                        .accessibilityIdentifier("home-calendar")
+                        .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 8, trailing: 8))
+                        .listRowSeparator(.hidden)
+                    } header: {
+                        SnapSectionTitle(title: String(localized: "SnapSchedule calendar"), symbol: "calendar")
+                    }
+
+                    Section {
+                        if selectedDateSchedules.isEmpty {
+                            ContentUnavailableView(
+                                String(localized: "No schedules on this date"),
+                                systemImage: "calendar.badge.minus"
+                            )
+                        } else {
+                            ForEach(selectedOriginalSchedules) { registered in
+                                VStack(alignment: .leading, spacing: 12) {
+                                    if let presentation = selectedDateSchedules.first(where: { $0.id == registered.id }) {
+                                        scheduleRow(presentation)
+                                    }
+                                    ScreenshotLinkedOriginal(sourceScreenshotIdentifier: registered.sourceAssetIdentifier,
+                                        scheduleID: registered.id, title: registered.title,
+                                        onOpen: { navigation.scheduleDetailID = registered.id })
+                                }
+                                .padding(.vertical, 12)
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                            }
+                        }
+                    } header: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(selectedDateTitle)
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                            Text(String(localized: "\(selectedOriginalSchedules.count) registered schedules")
+                                + " · " + String(localized: "Registration order"))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .textCase(nil)
+                        .accessibilityElement(children: .combine)
+                    }
+
+                    Section {
+                        if upcomingSchedules.isEmpty {
+                            ContentUnavailableView(
+                                String(localized: "No upcoming schedules"),
+                                systemImage: "calendar",
+                                description: Text(String(localized: "Registered future schedules will appear here."))
+                            )
+                        } else {
+                            ForEach(upcomingSchedules) { schedule in
+                                scheduleRow(schedule)
+                            }
+                        }
+                    } header: {
+                        SnapSectionTitle(title: String(localized: "Upcoming schedules"), symbol: "clock")
+                    }
+                }
+                .listStyle(.plain)
+                .listSectionSpacing(20)
+            }
+            .modifier(AdaptiveBannerLifecycle(manager: adsConsent, controller: bannerController,
+                eligible: homeAdsEligible, layout: layout))
+            .background(AdsConsentHomeHost(manager: adsConsent, eligible: homeAdsEligible))
         }
     }
 
@@ -426,8 +451,20 @@ struct HomeView: View {
     }
 
     private func refreshWidgetSnapshot() {
-        guard let storedSchedules = try? modelContext.fetch(FetchDescriptor<Schedule>()) else { return }
-        _ = try? WidgetSnapshotStore().write(schedules: storedSchedules)
+        let store = WidgetSnapshotStore()
+        do {
+            let storedSchedules: [Schedule]
+            do {
+                storedSchedules = try modelContext.fetch(FetchDescriptor<Schedule>())
+            } catch {
+                try store.invalidate()
+                throw error
+            }
+            _ = try store.write(schedules: storedSchedules)
+            widgetRefreshFailed = false
+        } catch {
+            widgetRefreshFailed = true
+        }
     }
 
     private func routeNotificationIfNeeded() {
@@ -520,4 +557,15 @@ struct HomeNotificationStatusView: View {
         }
     }
 
+}
+
+private struct WidgetRefreshFailureReporterKey: EnvironmentKey {
+    static let defaultValue: @MainActor @Sendable () -> Void = {}
+}
+
+extension EnvironmentValues {
+    var reportWidgetRefreshFailure: @MainActor @Sendable () -> Void {
+        get { self[WidgetRefreshFailureReporterKey.self] }
+        set { self[WidgetRefreshFailureReporterKey.self] = newValue }
+    }
 }

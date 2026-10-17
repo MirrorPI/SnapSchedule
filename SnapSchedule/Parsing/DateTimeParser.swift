@@ -39,12 +39,31 @@ struct DateTimeCandidateDraft: Equatable, Sendable {
 }
 
 struct DateTimeParser: Sendable {
+    // Bound work before regex/context matching. Reject the entire OCR result;
+    // truncation could remove a date qualifier and create an incorrect schedule.
+    static let maximumFragmentCount = 256
+    static let maximumTextUTF16Count = 8_000
+
+    static func acceptsInput(_ fragments: [RecognizedTextFragment]) -> Bool {
+        guard fragments.count <= maximumFragmentCount else { return false }
+        var remaining = maximumTextUTF16Count
+        for fragment in fragments {
+            // A bounded UTF-16 traversal also handles huge grapheme clusters
+            // without first counting every Character in an untrusted string.
+            let count = fragment.text.utf16.prefix(remaining + 1).count
+            guard count <= remaining else { return false }
+            remaining -= count
+        }
+        return true
+    }
+
     func parse(
         fragments: [RecognizedTextFragment],
         captureDate: Date?,
         analysisDate: Date,
         timeZone: TimeZone
     ) -> [DateTimeCandidateDraft] {
+        guard Self.acceptsInput(fragments) else { return [] }
         let inputs = Self.joinSplitMeridiem(in: fragments)
         let parsed = inputs.map { input in
             let fragment = input.fragment

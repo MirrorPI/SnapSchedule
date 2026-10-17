@@ -7,6 +7,8 @@ protocol NotificationCenterScheduling {
     func pendingRequests() async -> [UNNotificationRequest]
     func add(_ request: UNNotificationRequest) async throws
     func removePendingRequests(withIdentifiers identifiers: [String])
+    func deliveredRequests() async -> [UNNotificationRequest]
+    func removeDeliveredRequests(withIdentifiers identifiers: [String])
 }
 
 @MainActor
@@ -27,6 +29,14 @@ final class SystemNotificationCenter: NotificationCenterScheduling {
 
     func removePendingRequests(withIdentifiers identifiers: [String]) {
         center.removePendingNotificationRequests(withIdentifiers: identifiers)
+    }
+
+    func deliveredRequests() async -> [UNNotificationRequest] {
+        await center.deliveredNotifications().map(\.request)
+    }
+
+    func removeDeliveredRequests(withIdentifiers identifiers: [String]) {
+        center.removeDeliveredNotifications(withIdentifiers: identifiers)
     }
 }
 
@@ -127,6 +137,20 @@ final class NotificationScheduler {
         let pendingBefore = await center.pendingRequests()
         guard !Task.isCancelled else { return summary }
         let ownedBefore = pendingBefore.filter { Self.owns($0.identifier) }
+        let schedulesByID = Dictionary(uniqueKeysWithValues: schedules.map { ($0.id, $0) })
+        let delivered = await center.deliveredRequests()
+        guard !Task.isCancelled else { return summary }
+        let obsoleteDelivered = delivered.filter { request in
+            guard Self.owns(request.identifier) else { return false }
+            guard access.allowsScheduling,
+                  let id = NotificationPayload.scheduleID(from: request.content.userInfo),
+                  let schedule = schedulesByID[id],
+                  request.content.title == schedule.title else { return true }
+            guard let expected = ReminderPlanner.plan(for: schedule, now: referenceDate, includingPast: true)
+                .reminders.first(where: { $0.requestID == request.identifier }) else { return true }
+            return !Self.matches(request, reminder: expected, includingPast: true)
+        }
+        center.removeDeliveredRequests(withIdentifiers: obsoleteDelivered.map(\.identifier))
         NotificationSyncDiagnostics.record("pending.before.total=\(pendingBefore.count).owned=\(ownedBefore.count)")
 
         guard access.allowsScheduling else {
@@ -237,7 +261,8 @@ final class NotificationScheduler {
 
     private static func matches(
         _ request: UNNotificationRequest,
-        reminder: PlannedReminder
+        reminder: PlannedReminder,
+        includingPast: Bool = false
     ) -> Bool {
         guard
             request.content.title == reminder.title,
@@ -245,10 +270,17 @@ final class NotificationScheduler {
             NotificationPayload.scheduleID(from: request.content.userInfo) == reminder.scheduleID,
             request.content.userInfo[NotificationPayload.reminderKindKey] as? String == reminder.kind.rawValue,
             let trigger = request.trigger as? UNCalendarNotificationTrigger,
-            let fireDate = trigger.nextTriggerDate()
+            !trigger.repeats
         else {
             return false
         }
+        if includingPast {
+            // A delivered non-repeating trigger has no nextTriggerDate. Compare
+            // the original components, including its time zone, to keep valid history.
+            let expected = Self.request(for: reminder).trigger as? UNCalendarNotificationTrigger
+            return trigger.dateComponents == expected?.dateComponents
+        }
+        guard let fireDate = trigger.nextTriggerDate() else { return false }
         return abs(fireDate.timeIntervalSince(reminder.fireDate)) < 1
     }
 }

@@ -98,6 +98,23 @@ final class WidgetSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(store.read(), .success(empty))
     }
 
+    func testAtomicReplacementAppliesWidgetProtectionEvenWhenPreviousFileIsUnprotected() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appending(path: WidgetSnapshotStore.fileName)
+        try FileManager.default.setAttributes([.protectionKey: FileProtectionType.none], ofItemAtPath: directory.path)
+        try Data("old private title".utf8).write(to: fileURL, options: .noFileProtection)
+        guard try FileManager.default.attributesOfItem(atPath: fileURL.path)[.protectionKey] != nil else {
+            throw XCTSkip("File protection attributes require a physical iOS device")
+        }
+        let store = WidgetSnapshotStore(containerURL: { directory }, timelineReload: {})
+
+        _ = try store.write(schedules: [])
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+        XCTAssertEqual(attributes[.protectionKey] as? FileProtectionType, .completeUntilFirstUserAuthentication)
+    }
+
     func testReadDistinguishesMissingEmptyCorruptAndUnsupportedFiles() throws {
         let directory = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -116,11 +133,11 @@ final class WidgetSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(store.read(), .unsupportedFormatVersion(99))
     }
 
-    func testWriteFailureKeepsPreviousSnapshotAndRetryCanRegenerateIt() throws {
+    func testWriteFailureRemovesPrivatePreviousSnapshotAndRetryCanRegenerateIt() throws {
         let directory = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let originalStore = WidgetSnapshotStore(containerURL: { directory })
-        let original = try originalStore.write(schedules: [
+        _ = try originalStore.write(schedules: [
             schedule(id: id(1), title: "Original", date: CalendarDate(year: 2027, month: 1, day: 1))
         ])
         var shouldFail = true
@@ -143,7 +160,7 @@ final class WidgetSnapshotStoreTests: XCTestCase {
         XCTAssertThrowsError(try retryingStore.write(schedules: [replacement])) {
             XCTAssertEqual($0 as? WidgetSnapshotStoreError, .writeFailed)
         }
-        XCTAssertEqual(originalStore.read(), .success(original))
+        XCTAssertEqual(originalStore.read(), .missing)
 
         let regenerated = try retryingStore.write(schedules: [replacement])
         XCTAssertEqual(regenerated.schedules.map(\.id), [replacement.id])
@@ -181,6 +198,25 @@ final class WidgetSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(readerFinished.wait(timeout: .now() + 5), .success)
         XCTAssertGreaterThan(probe.readCount, 0)
         XCTAssertNil(probe.failure)
+    }
+
+    func testInvalidationRemovesPrivateSnapshotAndReloadsEvenWhenAlreadyAbsent() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var reloadCount = 0
+        let store = WidgetSnapshotStore(
+            containerURL: { directory },
+            timelineReload: { reloadCount += 1 }
+        )
+        _ = try store.write(schedules: [
+            schedule(id: id(1), title: "Private title", date: CalendarDate(year: 2027, month: 1, day: 1))
+        ])
+
+        try store.invalidate()
+        try store.invalidate()
+
+        XCTAssertEqual(store.read(), .missing)
+        XCTAssertEqual(reloadCount, 3)
     }
 
     func testUnavailableContainerIsDistinctAndCanBeRetried() throws {
@@ -323,7 +359,7 @@ final class WidgetSnapshotStoreTests: XCTestCase {
         XCTAssertNil(WidgetScheduleLink.scheduleID(from: URL(string: "snapschedule://other/\(scheduleID)")!))
     }
 
-    func testSuccessfulWriteRequestsTimelineReloadButFailedWriteDoesNot() throws {
+    func testFailedWriteAlsoRequestsTimelineReloadToDiscardCachedPrivateContent() throws {
         let directory = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         var reloadCount = 0
@@ -341,10 +377,10 @@ final class WidgetSnapshotStoreTests: XCTestCase {
         )
 
         XCTAssertThrowsError(try store.write(schedules: []))
-        XCTAssertEqual(reloadCount, 0)
+        XCTAssertEqual(reloadCount, 1)
 
         _ = try store.write(schedules: [])
-        XCTAssertEqual(reloadCount, 1)
+        XCTAssertEqual(reloadCount, 2)
     }
 
     private func makeDirectory() throws -> URL {

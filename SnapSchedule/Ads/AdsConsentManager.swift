@@ -4,6 +4,21 @@ import GoogleMobileAds
 import UserMessagingPlatform
 import SwiftUI
 import UIKit
+import AppTrackingTransparency
+
+@MainActor
+struct AdsTrackingAuthorization {
+    var status: () -> ATTrackingManager.AuthorizationStatus
+    var request: (@escaping @MainActor () -> Void) -> Void
+
+    static var live: Self {
+        Self(status: { ATTrackingManager.trackingAuthorizationStatus }, request: { done in
+            ATTrackingManager.requestTrackingAuthorization { _ in
+                Task { @MainActor in done() }
+            }
+        })
+    }
+}
 
 @MainActor
 struct AdsConsentSDK {
@@ -34,9 +49,10 @@ final class AdsConsentManager {
     private(set) var isBusy = false
     private let configured: Bool
     private let sdk: AdsConsentSDK
+    private let tracking: AdsTrackingAuthorization
     private var launched = false
     private var operation = 0
-    private enum Phase { case idle, updating, loading, pending, presenting, options }
+    private enum Phase { case idle, tracking, updating, loading, pending, presenting, options }
     private var phase = Phase.idle
     private var sdkStarting = false
     private var sdkReady = false
@@ -44,29 +60,66 @@ final class AdsConsentManager {
     private var homeIsSafe: () -> Bool = { false }
 
     var canRequestAds: Bool {
-        configured && state == .allowed && !isBusy && sdkReady && sdk.snapshot().canRequestAds
+        configured && tracking.status() == .authorized && state == .allowed
+            && !isBusy && sdkReady && sdk.snapshot().canRequestAds
     }
 
-    init(configuration: AdsConfiguration, sdk: AdsConsentSDK) {
+    init(configuration: AdsConfiguration, sdk: AdsConsentSDK, tracking: AdsTrackingAuthorization = .live) {
         if case .configured = configuration.state { configured = true } else { configured = false }
         self.sdk = sdk
+        self.tracking = tracking
         if !configured { state = .unavailable }
     }
 
     func activate() {
-        guard configured else { return }
+        guard requireTrackingPermission(mayRequest: true) else { return }
         if !launched { launched = true; update() }
         else if phase == .idle { evaluate() }
         homeBecameAvailable()
     }
 
     func retry() {
-        guard configured, !isBusy, phase == .idle else { return }
+        guard requireTrackingPermission(mayRequest: true), !isBusy, phase == .idle else { return }
         launched = true
         update()
     }
 
     func setHomePresentation(isSafe: @escaping () -> Bool) { homeIsSafe = isSafe }
+
+    /// Every Google entry point is closed until the live OS permission is authorized.
+    /// UMP consent does not replace ATT, and denial never blocks scheduling.
+    private func requireTrackingPermission(mayRequest: Bool) -> Bool {
+        guard configured else { return false }
+        let status = tracking.status()
+        if status == .authorized { return true }
+        guard phase != .tracking else { return false }
+        if state != .unavailable || phase != .idle || launched {
+            operation += 1
+            revision += 1
+            launched = false
+            phase = .idle
+            pendingForm = nil
+            sdkStarting = false
+            isBusy = false
+            privacyOptionsRequired = false
+            errorMessage = nil
+            state = .unavailable
+        }
+        guard mayRequest, status == .notDetermined, homeIsSafe() else { return false }
+        operation += 1
+        let ticket = operation
+        phase = .tracking
+        isBusy = true
+        tracking.request { [weak self] in
+            guard let self, self.operation == ticket, self.phase == .tracking else { return }
+            self.phase = .idle
+            self.isBusy = false
+            // A transient notDetermined response waits for the next active Home;
+            // never immediately loop another system permission request.
+            if self.tracking.status() == .authorized, self.homeIsSafe() { self.activate() }
+        }
+        return false
+    }
 
     private func invalidate() {
         revision += 1
@@ -82,6 +135,7 @@ final class AdsConsentManager {
         errorMessage = nil
         sdk.update { [weak self] error in
             guard let self, self.operation == ticket, self.phase == .updating else { return }
+            guard self.requireTrackingPermission(mayRequest: false) else { return }
             self.privacyOptionsRequired = self.sdk.snapshot().privacyOptionsRequired
             if let error { self.finish(error: error); return }
             if self.sdk.snapshot().formRequired {
@@ -94,6 +148,8 @@ final class AdsConsentManager {
 
     /// Rechecked after loading, so navigation/backgrounding cannot cause a late form over an editor.
     func homeBecameAvailable() {
+        guard requireTrackingPermission(mayRequest: true) else { return }
+        if !launched { activate(); return }
         guard phase == .pending, homeIsSafe() else { return }
         let ticket = operation
         if let form = pendingForm {
@@ -109,6 +165,7 @@ final class AdsConsentManager {
             isBusy = true
             sdk.loadForm { [weak self] result in
                 guard let self, self.operation == ticket, self.phase == .loading else { return }
+                guard self.requireTrackingPermission(mayRequest: false) else { return }
                 switch result {
                 case .success(let form):
                     self.pendingForm = form
@@ -122,7 +179,7 @@ final class AdsConsentManager {
     }
 
     func presentPrivacyOptions() {
-        guard configured, privacyOptionsRequired, !isBusy,
+        guard requireTrackingPermission(mayRequest: false), privacyOptionsRequired, !isBusy,
               phase == .idle || phase == .pending else { return }
         operation += 1
         let ticket = operation
@@ -133,6 +190,7 @@ final class AdsConsentManager {
         errorMessage = nil
         sdk.privacyOptions { [weak self] error in
             guard let self, self.operation == ticket, self.phase == .options else { return }
+            guard self.requireTrackingPermission(mayRequest: false) else { return }
             self.finish(error: error)
         }
     }
@@ -146,7 +204,7 @@ final class AdsConsentManager {
     }
 
     private func evaluate() {
-        guard phase == .idle else { return }
+        guard requireTrackingPermission(mayRequest: false), phase == .idle else { return }
         let snapshot = sdk.snapshot()
         privacyOptionsRequired = snapshot.privacyOptionsRequired
         guard snapshot.canRequestAds else {
@@ -159,7 +217,10 @@ final class AdsConsentManager {
             guard !sdkStarting else { return }
             sdkStarting = true
             sdk.start { [weak self] in
-                guard let self, !self.sdkReady else { return }
+                // SDK initialization is process-wide, not a UMP operation. A
+                // concurrent privacy-choice change must not strand sdkStarting.
+                guard let self, !self.sdkReady,
+                      self.requireTrackingPermission(mayRequest: false) else { return }
                 self.sdkReady = true
                 self.evaluate() // Read current UMP state, never a captured pre-reselection value.
             }
@@ -188,7 +249,7 @@ extension AdsConsentSDK {
                             formRequired: info.consentStatus == .required,
                             privacyOptionsRequired: info.privacyOptionsRequirementStatus == .required)
         }, update: { done in
-            // No debug geography, test-device override, reset or IDFA request in shipped code.
+            // ATT authorization is checked by the manager before any UMP call.
             ConsentInformation.shared.requestConsentInfoUpdate(with: RequestParameters()) { error in
                 MainActor.assumeIsolated { done(error) }
             }
